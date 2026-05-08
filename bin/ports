@@ -95,10 +95,11 @@ lsof_text = lsof_path.read_text(encoding="utf-8", errors="replace")
 
 def load_registry(path):
     if not path:
-        return {}
+        return {}, []
     text = Path(path).read_text(encoding="utf-8")
     current = None
     port_map = {}
+    entries = []
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -114,8 +115,10 @@ def load_registry(path):
             continue
         port = int(value)
         if 1 <= port <= 65535:
+            item = (current, key, port)
+            entries.append(item)
             port_map.setdefault(port, []).append((current, key))
-    return port_map
+    return port_map, entries
 
 
 def parse_lsof(text):
@@ -138,25 +141,60 @@ def parse_lsof(text):
         rows.append((command, pid, user, port, endpoint, name))
     return rows
 
-registry = load_registry(registry_path)
+
+def classify(entries):
+    if not entries:
+        return "UNKNOWN", "-", "-"
+    services = sorted({s for s, _ in entries})
+    roles = sorted({r for _, r in entries})
+    service = ",".join(services)
+    role = ",".join(roles)
+    status = "CONFLICT" if len(services) > 1 else "REGISTERED"
+    return status, service, role
+
+
+def print_row(status, service, role, command, pid, user, port, endpoint, name):
+    print(
+        f"{status:<14} {service:<34.34} {role:<18.18} {command:<20.20} "
+        f"{pid:<8} {user:<10.10} {port:<8} {endpoint:<24.24} {name}"
+    )
+
+
+registry, registry_entries = load_registry(registry_path)
 rows = parse_lsof(lsof_text)
+listening_ports = {port for _, _, _, port, _, _ in rows}
 
-print(f"{'STATUS':<12} {'SERVICE':<22} {'ROLE':<14} {'COMMAND':<20} {'PID':<8} {'USER':<10} {'PORT':<8} {'ADDRESS':<24} NAME")
-print(f"{'-'*12:<12} {'-'*22:<22} {'-'*14:<14} {'-'*20:<20} {'-'*8:<8} {'-'*10:<10} {'-'*8:<8} {'-'*24:<24} {'-'*4}")
+print(f"{'STATUS':<14} {'SERVICE':<34} {'ROLE':<18} {'COMMAND':<20} {'PID':<8} {'USER':<10} {'PORT':<8} {'ADDRESS':<24} NAME")
+print(f"{'-'*14:<14} {'-'*34:<34} {'-'*18:<18} {'-'*20:<20} {'-'*8:<8} {'-'*10:<10} {'-'*8:<8} {'-'*24:<24} {'-'*4}")
 
-if not rows:
-    print("No listening TCP sockets found.")
-    raise SystemExit(0)
-
+printed = False
 for command, pid, user, port, endpoint, name in rows:
+    status, service, role = classify(registry.get(port, []))
+    print_row(status, service, role, command, pid, user, port, endpoint, name)
+    printed = True
+
+for service, role, port in registry_entries:
+    if port in listening_ports:
+        continue
+    status = "EXPECTED_DOWN"
+    # If a missing port is also claimed by multiple services, preserve the stronger warning.
     entries = registry.get(port, [])
-    if entries:
-        service = ",".join(sorted({s for s, _ in entries}))
-        role = ",".join(sorted({r for _, r in entries}))
-        status = "REGISTERED"
+    services = sorted({s for s, _ in entries})
+    roles = sorted({r for _, r in entries})
+    if len(services) > 1:
+        status = "CONFLICT"
+        service_text = ",".join(services)
+        role_text = ",".join(roles)
+        # Print once for the conflicting missing port.
+        first_claim = min(entries)
+        if (service, role) != first_claim:
+            continue
     else:
-        service = "-"
-        role = "-"
-        status = "UNKNOWN"
-    print(f"{status:<12} {service:<22.22} {role:<14.14} {command:<20.20} {pid:<8} {user:<10.10} {port:<8} {endpoint:<24.24} {name}")
+        service_text = service
+        role_text = role
+    print_row(status, service_text, role_text, "-", "-", "-", port, "-", "registered port is not listening")
+    printed = True
+
+if not printed:
+    print("No listening TCP sockets or registry expectations found.")
 PY

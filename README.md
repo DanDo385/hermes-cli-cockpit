@@ -27,6 +27,7 @@ port-who 3000
 
 - `~/.local/bin/mission`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
 - `config/ports.toml` is the local active port registry. `config/ports.example.toml` is a copyable template.
+- `ports` classifications: `REGISTERED` active known listener, `UNKNOWN` active unregistered listener, `EXPECTED_DOWN` registered port not listening, `CONFLICT` duplicate service claims.
 
 ## Project goals
 

@@ -29,6 +29,6 @@ dev host: project repos, dev servers, Neovim/Cursor, coding agents
 - `hermes-health`: compact operator dashboard for gateway, cron, cron model routes, Gemini quota history, 1Password, SSH agent, and ports.
 - `devdash`: project tmux cockpit.
 - `proj`: project picker.
-- `ports`, `port-who`: read-only port inspection with optional TOML registry classification.
+- `ports`, `port-who`: read-only port inspection with TOML registry classification (`REGISTERED`, `UNKNOWN`, `EXPECTED_DOWN`, `CONFLICT`).
 - `port-kill`: future guarded port mutation.
 - `agent-task`, `agent-review`, `agent-merge`, `agent-drop`: worktree agent coordination.

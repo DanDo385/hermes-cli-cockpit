@@ -16,8 +16,10 @@ port-who 3000
 
 - Lists listening TCP sockets on the current host using `lsof`.
 - Shows host, mode, timestamp, and active registry path.
-- Classifies each listener as `REGISTERED` or `UNKNOWN` when a registry is available.
+- Classifies active listeners as `REGISTERED`, `UNKNOWN`, or `CONFLICT` when a registry is available.
+- Emits `EXPECTED_DOWN` rows for registered ports that are not currently listening.
 - Maps registered listeners to service and role names from TOML sections/keys.
+- Flags `CONFLICT` when more than one service claims the same port.
 - `port-who <port>` reports the process listening on one port.
 - No process killing is implemented in this slice.
 
@@ -49,6 +51,10 @@ Rules:
 - Numeric keys = roles mapped to TCP ports.
 - Non-numeric keys like `host` are metadata and ignored by the current classifier.
 - Dynamic/random browser debug ports should usually stay unregistered.
+- `REGISTERED` means exactly one service claims an active listening port.
+- `UNKNOWN` means an active listener is not in the registry.
+- `EXPECTED_DOWN` means a registered port is not currently listening.
+- `CONFLICT` means multiple services claim the same port; do not treat it as safe.
 
 ## Safety rule
 
@@ -56,7 +62,5 @@ Port inspection comes before port mutation. `port-kill` should be added only aft
 
 ## Next behavior
 
-- Flag `EXPECTED_DOWN` registry entries when a registered port is not currently listening.
 - Add host-aware mode for MBP/iMac via SSH/Tailscale.
-- Add conflict checks for two services claiming the same port.
 - Add guarded `port-kill <port>`.
