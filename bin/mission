@@ -18,6 +18,7 @@ Usage:
   mission --no-attach  create/verify without attaching
 
 Windows:
+  health    clear operator summary: gateway, cron, Gemini, 1Password, SSH, ports
   hermes    gateway log, error log, gateway status, shell
   cron      cron status loop, cron list shell
   sessions  sessions list loop, shell
@@ -55,8 +56,16 @@ require hermes
 
 mkdir -p "$LOG_DIR"
 
+if [[ -n "${SSH_AUTH_SOCK:-}" ]] && tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux set-environment -t "$SESSION" SSH_AUTH_SOCK "$SSH_AUTH_SOCK"
+fi
+
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-  tmux new-session -d -s "$SESSION" -n hermes "zsh -lc 'touch \"$LOG_DIR/gateway.log\"; tail -F \"$LOG_DIR/gateway.log\"'"
+  tmux new-session -d -s "$SESSION" -n health "zsh -lc 'while true; do clear; hermes-health 2>&1; sleep 20; done'"
+  tmux split-window -h -t "$SESSION:health" "zsh -l"
+  tmux select-layout -t "$SESSION:health" even-horizontal >/dev/null
+
+  tmux new-window -t "$SESSION" -n hermes "zsh -lc 'touch \"$LOG_DIR/gateway.log\"; tail -F \"$LOG_DIR/gateway.log\"'"
 
   tmux split-window -h -t "$SESSION:hermes" "zsh -lc 'touch \"$LOG_DIR/gateway.error.log\"; tail -F \"$LOG_DIR/gateway.error.log\"'"
   tmux split-window -v -t "$SESSION:hermes.1" "zsh -lc 'while true; do clear; date; echo; hermes gateway status 2>&1; sleep 15; done'"
@@ -84,9 +93,10 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux split-window -v -t "$SESSION:scratch.1" "zsh -l"
   tmux select-layout -t "$SESSION:scratch" tiled >/dev/null
 
-  tmux select-window -t "$SESSION:hermes"
+  tmux select-window -t "$SESSION:health"
 else
   # If the session already exists, add any missing top-level windows without touching existing panes.
+  new_window_if_missing health "zsh -lc 'while true; do clear; hermes-health 2>&1; sleep 20; done'"
   new_window_if_missing hermes "zsh -lc 'touch \"$LOG_DIR/gateway.log\"; tail -F \"$LOG_DIR/gateway.log\"'"
   new_window_if_missing cron "zsh -lc 'while true; do clear; date; echo; hermes cron status 2>&1; echo; hermes cron list 2>&1; sleep 30; done'"
   new_window_if_missing sessions "zsh -lc 'while true; do clear; date; echo; hermes sessions list 2>&1 | sed -n \"1,40p\"; sleep 45; done'"

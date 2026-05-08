@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+LOG_DIR="$HERMES_HOME/logs"
+GATEWAY_ERROR_LOG="$LOG_DIR/gateway.error.log"
+
+status_ok() { printf '%-18s %s\n' "$1:" "✅ $2"; }
+status_warn() { printf '%-18s %s\n' "$1:" "⚠️  $2"; }
+status_bad() { printf '%-18s %s\n' "$1:" "❌ $2"; }
+status_info() { printf '%-18s %s\n' "$1:" "ℹ️  $2"; }
+
+count_ports() {
+  lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | tail -n +2 | wc -l | tr -d ' '
+}
+
+check_gateway() {
+  if ! command -v hermes >/dev/null 2>&1; then
+    status_bad gateway "hermes command missing"
+    return
+  fi
+
+  local out
+  out="$(hermes gateway status 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'Gateway service is loaded'; then
+    if printf '%s\n' "$out" | grep -q '"PID"'; then
+      local pid
+      pid="$(printf '%s\n' "$out" | sed -n 's/.*"PID" = \([0-9][0-9]*\).*/\1/p' | head -1)"
+      status_ok gateway "running${pid:+, pid $pid}"
+    else
+      status_ok gateway "loaded"
+    fi
+  else
+    status_bad gateway "not loaded or status unclear"
+  fi
+}
+
+check_cron() {
+  if ! command -v hermes >/dev/null 2>&1; then
+    status_bad cron "hermes command missing"
+    return
+  fi
+
+  local out
+  out="$(hermes cron status 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'running'; then
+    status_ok cron "running"
+  elif printf '%s\n' "$out" | grep -qi 'active'; then
+    status_ok cron "active"
+  else
+    status_warn cron "status unclear"
+  fi
+}
+
+check_gemini() {
+  if [[ -f "$GATEWAY_ERROR_LOG" ]] && tail -n 300 "$GATEWAY_ERROR_LOG" 2>/dev/null | grep -Eq 'Gemini HTTP 429|RESOURCE_EXHAUSTED|Quota exceeded'; then
+    status_bad gemini "quota exhausted / HTTP 429 seen in gateway.error.log"
+  else
+    status_ok gemini "no recent quota errors found"
+  fi
+}
+
+check_onepassword() {
+  if ! command -v op >/dev/null 2>&1; then
+    status_bad "1password cli" "op command missing"
+    return
+  fi
+
+  local out
+  out="$(op whoami 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'User Type'; then
+    local user_type
+    user_type="$(printf '%s\n' "$out" | sed -n 's/^User Type:[[:space:]]*//p' | head -1)"
+    status_ok "1password cli" "connected${user_type:+ as $user_type}"
+  else
+    status_bad "1password cli" "not authenticated"
+  fi
+}
+
+check_ssh_agent() {
+  if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+    status_bad "ssh agent" "SSH_AUTH_SOCK unset"
+    return
+  fi
+
+  local out
+  out="$(ssh-add -l 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'no identities'; then
+    status_warn "ssh agent" "connected, no identities loaded"
+  elif printf '%s\n' "$out" | grep -Eq 'SHA256|ssh-ed25519|RSA|ED25519'; then
+    local count
+    count="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+    status_ok "ssh agent" "$count identity/identities available"
+  else
+    status_warn "ssh agent" "status unclear: $out"
+  fi
+}
+
+check_ports() {
+  local n
+  n="$(count_ports)"
+  status_info ports "$n listening TCP socket(s)"
+}
+
+main() {
+  printf 'Hermes CLI Cockpit Health\n'
+  printf 'Host: %s\n' "$(hostname)"
+  printf 'Time: %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+  printf '\n'
+
+  check_gateway
+  check_cron
+  check_gemini
+  check_onepassword
+  check_ssh_agent
+  check_ports
+
+  printf '\nHints:\n'
+  printf '  tmux windows: Ctrl-b w for picker, Ctrl-b n next, Ctrl-b p previous\n'
+  printf '  direct window jump: Ctrl-b <number shown in the bottom bar>\n'
+  printf '  inspect ports: ports | port-who <port>\n'
+}
+
+main "$@"

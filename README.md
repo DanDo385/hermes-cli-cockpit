@@ -10,6 +10,7 @@ This repo is being extracted from Dan's private MBP/iMac Hermes workflow into a 
 
 ```bash
 bin/mission --no-attach
+bin/hermes-health
 bin/ports
 bin/port-who 3000
 ```
@@ -18,6 +19,7 @@ Installed commands during local development:
 
 ```bash
 mission
+hermes-health
 ports
 port-who 3000
 ```
