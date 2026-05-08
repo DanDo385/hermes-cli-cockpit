@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'HELP'
+ports: list listening TCP ports on this host
+
+Usage:
+  ports              list listeners
+  ports --local      list listeners on this host (default)
+  ports --all        currently same as --local; reserved for host-aware future
+  ports --help       show help
+
+Notes:
+  Read-only. Does not kill processes.
+  Future versions will compare live listeners against config/ports.toml.
+HELP
+}
+
+MODE="local"
+for arg in "$@"; do
+  case "$arg" in
+    --local) MODE="local" ;;
+    --all) MODE="all" ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ports: unknown argument: $arg" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if ! command -v lsof >/dev/null 2>&1; then
+  echo "ports: required command missing: lsof" >&2
+  exit 1
+fi
+
+printf 'Host: %s\n' "$(hostname)"
+printf 'Mode: %s\n' "$MODE"
+printf 'Time: %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+printf '\n'
+printf '%-24s %-8s %-10s %-8s %-22s %s\n' COMMAND PID USER PORT ADDRESS NAME
+printf '%-24s %-8s %-10s %-8s %-22s %s\n' ------------------------ -------- ---------- -------- ---------------------- ----
+
+lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
+  | tail -n +2 \
+  | while IFS= read -r line; do
+      command_name=$(printf '%s\n' "$line" | awk '{print $1}')
+      pid=$(printf '%s\n' "$line" | awk '{print $2}')
+      user=$(printf '%s\n' "$line" | awk '{print $3}')
+      name=$(printf '%s\n' "$line" | sed -E 's/^([^[:space:]]+[[:space:]]+){8}//')
+      endpoint=$(printf '%s\n' "$name" | awk '{print $1}')
+      address="$endpoint"
+      port="?"
+      if [[ "$endpoint" == *:* ]]; then
+        port="${endpoint##*:}"
+      fi
+      printf '%-24s %-8s %-10s %-8s %-22s %s\n' "$command_name" "$pid" "$user" "$port" "$address" "$name"
+    done

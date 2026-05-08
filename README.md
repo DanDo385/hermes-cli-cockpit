@@ -6,19 +6,23 @@ Hermes CLI Cockpit is a terminal-native operator cockpit for AI-assisted develop
 
 This repo is being extracted from Dan's private MBP/iMac Hermes workflow into a public-ready CLI project.
 
-## First command
+## First commands
 
 ```bash
 bin/mission --no-attach
+bin/ports
+bin/port-who 3000
 ```
 
-Installed command during local development:
+Installed commands during local development:
 
 ```bash
 mission
+ports
+port-who 3000
 ```
 
-`~/.local/bin/mission` should symlink to `~/Code/hermes-cli-cockpit/bin/mission`.
+`~/.local/bin/mission`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
 
 ## Project goals
 

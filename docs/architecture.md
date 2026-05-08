@@ -28,5 +28,6 @@ dev host: project repos, dev servers, Neovim/Cursor, coding agents
 - `mission`: control-host tmux cockpit.
 - `devdash`: project tmux cockpit.
 - `proj`: project picker.
-- `ports`, `port-who`, `port-kill`: port management.
+- `ports`, `port-who`: read-only port inspection.
+- `port-kill`: future guarded port mutation.
 - `agent-task`, `agent-review`, `agent-merge`, `agent-drop`: worktree agent coordination.
