@@ -6,24 +6,40 @@ usage() {
 ports: list listening TCP ports on this host
 
 Usage:
-  ports              list listeners
-  ports --local      list listeners on this host (default)
-  ports --all        currently same as --local; reserved for host-aware future
-  ports --help       show help
+  ports                         list listeners
+  ports --local                 list listeners on this host (default)
+  ports --all                   currently same as --local; reserved for host-aware future
+  ports --registry <path>       classify listeners against a TOML port registry
+  ports --help                  show help
+
+Registry lookup order:
+  1. --registry <path>
+  2. HERMES_COCKPIT_PORTS_CONFIG
+  3. config/ports.toml next to this repo
+  4. ~/.config/hermes-cli-cockpit/ports.toml
 
 Notes:
   Read-only. Does not kill processes.
-  Future versions will compare live listeners against config/ports.toml.
 HELP
 }
 
 MODE="local"
-for arg in "$@"; do
-  case "$arg" in
-    --local) MODE="local" ;;
-    --all) MODE="all" ;;
+REGISTRY="${HERMES_COCKPIT_PORTS_CONFIG:-}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --local) MODE="local"; shift ;;
+    --all) MODE="all"; shift ;;
+    --registry)
+      if [[ -z "${2:-}" ]]; then
+        echo "ports: --registry requires a path" >&2
+        exit 2
+      fi
+      REGISTRY="$2"
+      shift 2
+      ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "ports: unknown argument: $arg" >&2; usage >&2; exit 2 ;;
+    *) echo "ports: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
@@ -32,25 +48,115 @@ if ! command -v lsof >/dev/null 2>&1; then
   exit 1
 fi
 
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  SOURCE_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  TARGET="$(readlink "$SOURCE")"
+  if [[ "$TARGET" == /* ]]; then
+    SOURCE="$TARGET"
+  else
+    SOURCE="$SOURCE_DIR/$TARGET"
+  fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -z "$REGISTRY" ]]; then
+  if [[ -f "$REPO_ROOT/config/ports.toml" ]]; then
+    REGISTRY="$REPO_ROOT/config/ports.toml"
+  elif [[ -f "$HOME/.config/hermes-cli-cockpit/ports.toml" ]]; then
+    REGISTRY="$HOME/.config/hermes-cli-cockpit/ports.toml"
+  fi
+fi
+
+if [[ -n "$REGISTRY" && ! -f "$REGISTRY" ]]; then
+  echo "ports: registry not found: $REGISTRY" >&2
+  exit 1
+fi
+
+LSOF_TMP="$(mktemp)"
+trap 'rm -f "$LSOF_TMP"' EXIT
+lsof -nP -iTCP -sTCP:LISTEN >"$LSOF_TMP" 2>/dev/null || true
+
 printf 'Host: %s\n' "$(hostname)"
 printf 'Mode: %s\n' "$MODE"
 printf 'Time: %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+printf 'Registry: %s\n' "${REGISTRY:-none}"
 printf '\n'
-printf '%-24s %-8s %-10s %-8s %-22s %s\n' COMMAND PID USER PORT ADDRESS NAME
-printf '%-24s %-8s %-10s %-8s %-22s %s\n' ------------------------ -------- ---------- -------- ---------------------- ----
 
-lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
-  | tail -n +2 \
-  | while IFS= read -r line; do
-      command_name=$(printf '%s\n' "$line" | awk '{print $1}')
-      pid=$(printf '%s\n' "$line" | awk '{print $2}')
-      user=$(printf '%s\n' "$line" | awk '{print $3}')
-      name=$(printf '%s\n' "$line" | sed -E 's/^([^[:space:]]+[[:space:]]+){8}//')
-      endpoint=$(printf '%s\n' "$name" | awk '{print $1}')
-      address="$endpoint"
-      port="?"
-      if [[ "$endpoint" == *:* ]]; then
-        port="${endpoint##*:}"
-      fi
-      printf '%-24s %-8s %-10s %-8s %-22s %s\n' "$command_name" "$pid" "$user" "$port" "$address" "$name"
-    done
+python3 - "$REGISTRY" "$LSOF_TMP" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+registry_path = sys.argv[1] if len(sys.argv) > 1 else ""
+lsof_path = Path(sys.argv[2])
+lsof_text = lsof_path.read_text(encoding="utf-8", errors="replace")
+
+
+def load_registry(path):
+    if not path:
+        return {}
+    text = Path(path).read_text(encoding="utf-8")
+    current = None
+    port_map = {}
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        m = re.fullmatch(r"\[([^\]]+)\]", line)
+        if m:
+            current = m.group(1).strip()
+            continue
+        if current is None or "=" not in line:
+            continue
+        key, value = [part.strip() for part in line.split("=", 1)]
+        if not re.fullmatch(r"[0-9]+", value):
+            continue
+        port = int(value)
+        if 1 <= port <= 65535:
+            port_map.setdefault(port, []).append((current, key))
+    return port_map
+
+
+def parse_lsof(text):
+    rows = []
+    for line in text.splitlines()[1:]:
+        if not line.strip():
+            continue
+        parts = line.split(None, 8)
+        if len(parts) < 9:
+            continue
+        command, pid, user, name = parts[0], parts[1], parts[2], parts[8]
+        endpoint = name.split()[0] if name.split() else ""
+        port = None
+        if ":" in endpoint:
+            candidate = endpoint.rsplit(":", 1)[1]
+            if candidate.isdigit():
+                port = int(candidate)
+        if port is None:
+            continue
+        rows.append((command, pid, user, port, endpoint, name))
+    return rows
+
+registry = load_registry(registry_path)
+rows = parse_lsof(lsof_text)
+
+print(f"{'STATUS':<12} {'SERVICE':<22} {'ROLE':<14} {'COMMAND':<20} {'PID':<8} {'USER':<10} {'PORT':<8} {'ADDRESS':<24} NAME")
+print(f"{'-'*12:<12} {'-'*22:<22} {'-'*14:<14} {'-'*20:<20} {'-'*8:<8} {'-'*10:<10} {'-'*8:<8} {'-'*24:<24} {'-'*4}")
+
+if not rows:
+    print("No listening TCP sockets found.")
+    raise SystemExit(0)
+
+for command, pid, user, port, endpoint, name in rows:
+    entries = registry.get(port, [])
+    if entries:
+        service = ",".join(sorted({s for s, _ in entries}))
+        role = ",".join(sorted({r for _, r in entries}))
+        status = "REGISTERED"
+    else:
+        service = "-"
+        role = "-"
+        status = "UNKNOWN"
+    print(f"{status:<12} {service:<22.22} {role:<14.14} {command:<20.20} {pid:<8} {user:<10.10} {port:<8} {endpoint:<24.24} {name}")
+PY

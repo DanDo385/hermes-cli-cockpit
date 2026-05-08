@@ -18,7 +18,7 @@ Usage:
   mission --no-attach  create/verify without attaching
 
 Windows:
-  health    clear operator summary: gateway, cron, Gemini, 1Password, SSH, ports
+  health    clear operator summary: gateway, cron, cron model routes, 1Password, SSH, ports
   hermes    gateway log, error log, gateway status, shell
   cron      cron status loop, cron list shell
   sessions  sessions list loop, shell
@@ -84,7 +84,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux split-window -h -t "$SESSION:secrets" "zsh -l"
   tmux select-layout -t "$SESSION:secrets" even-horizontal >/dev/null
 
-  tmux new-window -t "$SESSION" -n ports "zsh -lc 'while true; do clear; date; echo; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | sed -n \"1,80p\"; sleep 20; done'"
+  tmux new-window -t "$SESSION" -n ports "zsh -lc 'while true; do clear; ports 2>&1 | sed -n \"1,80p\"; sleep 20; done'"
   tmux split-window -h -t "$SESSION:ports" "zsh -l"
   tmux select-layout -t "$SESSION:ports" even-horizontal >/dev/null
 
@@ -101,7 +101,7 @@ else
   new_window_if_missing cron "zsh -lc 'while true; do clear; date; echo; hermes cron status 2>&1; echo; hermes cron list 2>&1; sleep 30; done'"
   new_window_if_missing sessions "zsh -lc 'while true; do clear; date; echo; hermes sessions list 2>&1 | sed -n \"1,40p\"; sleep 45; done'"
   new_window_if_missing secrets "zsh -lc 'while true; do clear; date; echo; op whoami 2>&1 || true; sleep 60; done'"
-  new_window_if_missing ports "zsh -lc 'while true; do clear; date; echo; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | sed -n \"1,80p\"; sleep 20; done'"
+  new_window_if_missing ports "zsh -lc 'while true; do clear; ports 2>&1 | sed -n \"1,80p\"; sleep 20; done'"
   new_window_if_missing scratch "zsh -l"
 fi
 

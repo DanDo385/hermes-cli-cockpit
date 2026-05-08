@@ -1,10 +1,16 @@
 # Example port registry
+# Copy to config/ports.toml for local use, or pass --registry <path>.
+# Numeric keys become roles. Section names become service names.
 
 [portfolio-site]
 host = "dev-host"
 frontend = 3000
 preview = 3001
 
-[hermes-cli-cockpit]
+[litellm-proxy]
 host = "control-host"
-mission = 0
+local_proxy = 4000
+
+[discord-desktop]
+host = "control-host"
+local_rpc = 6463

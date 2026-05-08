@@ -1,0 +1,11 @@
+# Active local port registry for Hermes CLI Cockpit
+# Read by: ports
+# Safety: labels only. This file does not grant permission to kill processes.
+
+[litellm-proxy]
+host = "control-host"
+local_proxy = 4000
+
+[discord-desktop]
+host = "control-host"
+local_rpc = 6463

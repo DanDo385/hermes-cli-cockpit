@@ -12,6 +12,7 @@ This repo is being extracted from Dan's private MBP/iMac Hermes workflow into a 
 bin/mission --no-attach
 bin/hermes-health
 bin/ports
+bin/ports --registry config/ports.toml
 bin/port-who 3000
 ```
 
@@ -24,7 +25,8 @@ ports
 port-who 3000
 ```
 
-`~/.local/bin/mission`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
+- `~/.local/bin/mission`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
+- `config/ports.toml` is the local active port registry. `config/ports.example.toml` is a copyable template.
 
 ## Project goals
 

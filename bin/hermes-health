@@ -52,9 +52,54 @@ check_cron() {
   fi
 }
 
-check_gemini() {
+check_cron_models() {
+  local jobs_json="$HERMES_HOME/cron/jobs.json"
+  if [[ ! -f "$jobs_json" ]]; then
+    status_warn "cron models" "jobs.json not found"
+    return
+  fi
+
+  local out
+  out="$(python3 - "$jobs_json" <<'PY' 2>/dev/null || true
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+active = [j for j in data.get('jobs', []) if j.get('enabled', True)]
+gemini = []
+pinned = []
+inherited = 0
+for job in active:
+    provider = job.get('provider')
+    model = job.get('model')
+    name = job.get('name') or job.get('id') or '<unnamed>'
+    route = ' '.join(str(x) for x in (provider, model) if x)
+    if not provider and not model:
+        inherited += 1
+    else:
+        pinned.append((provider or '<default-provider>', model or '<default-model>'))
+    if 'gemini' in route.lower():
+        gemini.append(name)
+if gemini:
+    print('bad|' + ', '.join(gemini[:4]))
+else:
+    routes = sorted(set(f'{p}/{m}' for p, m in pinned))
+    summary = ', '.join(routes[:3]) if routes else 'all inherit default'
+    suffix = f'; {inherited} inherit default' if inherited else ''
+    print('ok|' + summary + suffix)
+PY
+)"
+
+  case "$out" in
+    bad\|*) status_bad "cron models" "active Gemini cron override(s): ${out#bad|}" ;;
+    ok\|*) status_ok "cron models" "${out#ok|}; no active Gemini cron overrides" ;;
+    *) status_warn "cron models" "unable to inspect cron model routes" ;;
+  esac
+}
+
+check_gemini_history() {
   if [[ -f "$GATEWAY_ERROR_LOG" ]] && tail -n 300 "$GATEWAY_ERROR_LOG" 2>/dev/null | grep -Eq 'Gemini HTTP 429|RESOURCE_EXHAUSTED|Quota exceeded'; then
-    status_bad gemini "quota exhausted / HTTP 429 seen in gateway.error.log"
+    status_warn gemini "historical Gemini quota errors remain in logs"
   else
     status_ok gemini "no recent quota errors found"
   fi
@@ -110,7 +155,8 @@ main() {
 
   check_gateway
   check_cron
-  check_gemini
+  check_cron_models
+  check_gemini_history
   check_onepassword
   check_ssh_agent
   check_ports
