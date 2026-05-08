@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="mission-control"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+LOG_DIR="$HERMES_HOME/logs"
+NO_ATTACH=0
+
+for arg in "${@:-}"; do
+  case "$arg" in
+    --no-attach) NO_ATTACH=1 ;;
+    -h|--help)
+      cat <<'HELP'
+mission: open or create the MBP Mission Control tmux session
+
+Usage:
+  mission              create/attach mission-control
+  mission --no-attach  create/verify without attaching
+
+Windows:
+  hermes    gateway log, error log, gateway status, shell
+  cron      cron status loop, cron list shell
+  sessions  sessions list loop, shell
+  secrets   1Password status loop, shell
+  ports     listening ports loop, shell
+  scratch   blank zsh shells
+HELP
+      exit 0
+      ;;
+  esac
+done
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "mission: required command missing: $1" >&2
+    exit 1
+  fi
+}
+
+window_exists() {
+  tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | grep -Fxq "$1"
+}
+
+new_window_if_missing() {
+  local name="$1"
+  local cmd="$2"
+  if ! window_exists "$name"; then
+    tmux new-window -t "$SESSION" -n "$name" "$cmd"
+  fi
+}
+
+require tmux
+require zsh
+require hermes
+
+mkdir -p "$LOG_DIR"
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux new-session -d -s "$SESSION" -n hermes "zsh -lc 'touch \"$LOG_DIR/gateway.log\"; tail -F \"$LOG_DIR/gateway.log\"'"
+
+  tmux split-window -h -t "$SESSION:hermes" "zsh -lc 'touch \"$LOG_DIR/gateway.error.log\"; tail -F \"$LOG_DIR/gateway.error.log\"'"
+  tmux split-window -v -t "$SESSION:hermes.1" "zsh -lc 'while true; do clear; date; echo; hermes gateway status 2>&1; sleep 15; done'"
+  tmux split-window -v -t "$SESSION:hermes.2" "zsh -l"
+  tmux select-layout -t "$SESSION:hermes" tiled >/dev/null
+
+  tmux new-window -t "$SESSION" -n cron "zsh -lc 'while true; do clear; date; echo; hermes cron status 2>&1; echo; hermes cron list 2>&1; sleep 30; done'"
+  tmux split-window -h -t "$SESSION:cron" "zsh -l"
+  tmux select-layout -t "$SESSION:cron" even-horizontal >/dev/null
+
+  tmux new-window -t "$SESSION" -n sessions "zsh -lc 'while true; do clear; date; echo; hermes sessions list 2>&1 | sed -n \"1,40p\"; sleep 45; done'"
+  tmux split-window -h -t "$SESSION:sessions" "zsh -l"
+  tmux select-layout -t "$SESSION:sessions" even-horizontal >/dev/null
+
+  tmux new-window -t "$SESSION" -n secrets "zsh -lc 'while true; do clear; date; echo; op whoami 2>&1 || true; echo; printf \"SSH_AUTH_SOCK=%s\\n\" \"$SSH_AUTH_SOCK\"; ssh-add -l 2>&1 || true; sleep 60; done'"
+  tmux split-window -h -t "$SESSION:secrets" "zsh -l"
+  tmux select-layout -t "$SESSION:secrets" even-horizontal >/dev/null
+
+  tmux new-window -t "$SESSION" -n ports "zsh -lc 'while true; do clear; date; echo; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | sed -n \"1,80p\"; sleep 20; done'"
+  tmux split-window -h -t "$SESSION:ports" "zsh -l"
+  tmux select-layout -t "$SESSION:ports" even-horizontal >/dev/null
+
+  tmux new-window -t "$SESSION" -n scratch "zsh -l"
+  tmux split-window -h -t "$SESSION:scratch" "zsh -l"
+  tmux split-window -v -t "$SESSION:scratch.1" "zsh -l"
+  tmux select-layout -t "$SESSION:scratch" tiled >/dev/null
+
+  tmux select-window -t "$SESSION:hermes"
+else
+  # If the session already exists, add any missing top-level windows without touching existing panes.
+  new_window_if_missing hermes "zsh -lc 'touch \"$LOG_DIR/gateway.log\"; tail -F \"$LOG_DIR/gateway.log\"'"
+  new_window_if_missing cron "zsh -lc 'while true; do clear; date; echo; hermes cron status 2>&1; echo; hermes cron list 2>&1; sleep 30; done'"
+  new_window_if_missing sessions "zsh -lc 'while true; do clear; date; echo; hermes sessions list 2>&1 | sed -n \"1,40p\"; sleep 45; done'"
+  new_window_if_missing secrets "zsh -lc 'while true; do clear; date; echo; op whoami 2>&1 || true; sleep 60; done'"
+  new_window_if_missing ports "zsh -lc 'while true; do clear; date; echo; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | sed -n \"1,80p\"; sleep 20; done'"
+  new_window_if_missing scratch "zsh -l"
+fi
+
+if [[ "$NO_ATTACH" -eq 1 ]]; then
+  echo "mission: session ready: $SESSION"
+  tmux list-windows -t "$SESSION"
+else
+  exec tmux attach -t "$SESSION"
+fi

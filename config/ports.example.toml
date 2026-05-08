@@ -1,0 +1,10 @@
+# Example port registry
+
+[portfolio-site]
+host = "dev-host"
+frontend = 3000
+preview = 3001
+
+[hermes-cli-cockpit]
+host = "control-host"
+mission = 0

@@ -1,0 +1,7 @@
+# Example project registry
+
+[portfolio-site]
+path = "/Users/example/Code/portfolio-site"
+host = "dev-host"
+session = "portfolio-site"
+frontend_port = 3000
