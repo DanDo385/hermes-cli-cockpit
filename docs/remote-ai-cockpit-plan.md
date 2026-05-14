@@ -1,6 +1,6 @@
 # Remote AI Cockpit Implementation Plan
 
-> For Hermes: keep repo implementation lean. Keep deep/tinker research in Obsidian. This plan is the operational blueprint for local cmux + remote tmux + Tailscale + Hermes/OpenClaw/agent-deck.
+> For Hermes: keep repo implementation lean. Keep deep/tinker research in Obsidian. This plan is the operational blueprint for local cmux + remote tmux + Tailscale + Hermes/OpenClaw/agent-deck. The north-star design recommendation lives in `docs/cmux-ai-assistant-workspace-design.md`.
 
 ## Goal
 

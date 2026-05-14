@@ -26,7 +26,7 @@ dev host: project repos, dev servers, Neovim/Cursor, coding agents
 ## Command families
 
 - `mission`: control-host tmux cockpit.
-- `cmux`: repo workbench for Neovim editing, diffs, browser smoke tests, CLI coding agents, PR status, Obsidian notes, and dry-run-first Discord discussion posting.
+- `cmux`: repo workbench for Neovim editing, diffs, browser smoke tests, CLI coding agents, PR status, Obsidian notes, and dry-run-first Discord discussion posting. This repo helper must be renamed before official native cmux is installed into PATH.
 - `cctx`: cwd-aware context card/router for cmux. It detects project/vault/agent context and prints safe launch commands without rebuilding or mutating gateways.
 - `hermes-health`: compact operator dashboard for gateway, cron, cron model routes, Gemini quota history, 1Password, SSH agent, and ports.
 - `devdash`: project tmux cockpit.
@@ -53,4 +53,4 @@ The design target is outside-in navigation:
 project or Hermes conversation -> context router -> center surface -> nearby scratch/action pane
 ```
 
-`docs/cmux-flexible-workspace.md` tracks the native cmux/Kickstart/agent-deck research and cwd-aware router path. `bin/cctx` is the first implementation seed for that router.
+`docs/cmux-ai-assistant-workspace-design.md` is the north-star product/workflow recommendation across the three planes: mission control, coding workbench, and agent orchestration/community. `docs/cmux-flexible-workspace.md` tracks the native cmux/Kickstart/agent-deck research and cwd-aware router path. `bin/cctx` is the first implementation seed for that router.
