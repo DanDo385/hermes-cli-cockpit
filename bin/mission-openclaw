@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="${MISSION_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+export MISSION_REPO_DIR="$REPO_DIR"
+export MISSION_AGENT="openclaw"
+export MISSION_TITLE="OpenClaw Mission Control"
+export MISSION_SESSION="${MISSION_SESSION:-mission-openclaw}"
+export MISSION_WEB_PORT="${MISSION_WEB_PORT:-4174}"
+export MISSION_GATEWAY_PORT="${MISSION_GATEWAY_PORT:-19001}"
+export MISSION_BROWSER_PORT="${MISSION_BROWSER_PORT:-19003}"
+export OPENCLAW_PROFILE_FLAG="${OPENCLAW_PROFILE_FLAG:---dev}"
+export OPENCLAW_LOG_FILE="${OPENCLAW_LOG_FILE:-/tmp/openclaw/openclaw-$(date +%F).log}"
+exec "$REPO_DIR/bin/mission-agent" "$@"

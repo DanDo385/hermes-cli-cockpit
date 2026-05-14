@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROLE="${1:-overview}"
+PAGE="${2:-${ROLE}}"
+AGENT="${MISSION_AGENT:-hermes}"
+TITLE="${MISSION_TITLE:-Hermes Mission Control}"
+REPO_DIR="${MISSION_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+OPENCLAW_PROFILE_FLAG="${OPENCLAW_PROFILE_FLAG:---dev}"
+OPENCLAW_LOG_FILE="${OPENCLAW_LOG_FILE:-/tmp/openclaw/openclaw-$(date +%F).log}"
+HERMES_LOG_DIR="${HERMES_LOG_DIR:-$HERMES_HOME/logs}"
+WEB_PORT="${MISSION_WEB_PORT:-}"
+GATEWAY_PORT="${MISSION_GATEWAY_PORT:-}"
+BROWSER_PORT="${MISSION_BROWSER_PORT:-}"
+SESSION_NAME="${MISSION_SESSION:-mission-${AGENT}}"
+
+hr() { printf '%*s\n' "${COLUMNS:-100}" '' | tr ' ' '-'; }
+now() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+agent_label() { printf '%s' "$(printf '%s' "$AGENT" | tr '[:lower:]' '[:upper:]')"; }
+
+header() {
+  clear || true
+  printf '%s :: %s\n' "$TITLE" "$1"
+  printf 'Agent: %s   Host: %s   Time: %s\n' "$(agent_label)" "$(hostname)" "$(now)"
+  if command -v tailscale >/dev/null 2>&1; then
+    local tip
+    tip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+    [[ -n "$tip" ]] && printf 'Tailscale: %s\n' "$tip"
+  fi
+  hr
+  printf '\n'
+}
+
+loop() {
+  local title="$1" delay="$2"
+  shift 2
+  while true; do
+    header "$title"
+    "$@" 2>&1 || true
+    printf '\n'
+    hr
+    printf 'Refresh: every %ss   Ctrl-c stops this pane command   Ctrl-b d detach   Ctrl-b z zoom\n' "$delay"
+    sleep "$delay"
+  done
+}
+
+agent_cmd() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    printf 'openclaw %s' "$OPENCLAW_PROFILE_FLAG"
+  else
+    printf 'hermes'
+  fi
+}
+
+run_agent() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    command openclaw $OPENCLAW_PROFILE_FLAG "$@"
+  else
+    command hermes "$@"
+  fi
+}
+
+show_page_guide() {
+  local page="$PAGE"
+  cat <<GUIDE
+PAGE SHORTCUTS
+  Ctrl-b w       page picker
+  Ctrl-b n / p   next / previous page
+  Ctrl-b 0-9     jump by bottom-bar number
+  Ctrl-b arrows  move between panes
+  Ctrl-b z       zoom current pane
+  Ctrl-b d       detach safely
+
+WINDOWS
+  0 chat       main ${AGENT} CLI/TUI chat
+  1 overview   health, URLs, operator map
+  2 gateway    gateway status + control hints
+  3 cron       cron status/jobs
+  4 sessions   session list + cleanup hints
+  5 heartbeat  heartbeat/system events
+  6 ports      local listeners + port registry
+  7 secrets    1Password/SSH readiness only
+  8 logs       gateway/agent logs
+  9 scratch    blank command shell
+
+THIS PAGE
+GUIDE
+  case "$page" in
+    chat) printf '  Type to %s in the large pane. Use /help inside the CLI/TUI.\n' "$AGENT" ;;
+    overview) printf '  Read health first. URLs show MBP-local and Tailscale/tunnel options.\n' ;;
+    gateway) printf '  Start/stop/probe gateway. Do not restart-loop during provider/platform outages.\n' ;;
+    cron) printf '  Inspect scheduled jobs. Cron runs through each agent gateway/scheduler.\n' ;;
+    sessions) printf '  List sessions. Inspect before cleanup. Never kill gateway PID casually.\n' ;;
+    heartbeat) printf '  Check heartbeat/system presence and launchd heartbeat for Hermes.\n' ;;
+    ports) printf '  Find which process owns each port. Inspection before mutation.\n' ;;
+    secrets) printf '  Safe readiness only. No raw token/env/secret output.\n' ;;
+    logs) printf '  Follow logs. Compare timestamps before treating old errors as active.\n' ;;
+    scratch) printf '  Free shell for experiments. Use repo worktrees for code changes.\n' ;;
+    *) printf '  General cockpit pane.\n' ;;
+  esac
+}
+
+show_overview() {
+  printf 'Operator model\n'
+  printf '  launchd owns durable production services. tmux owns visibility and manual control.\n'
+  printf '  Hermes remains production/stable. OpenClaw should be dev/sandbox unless explicitly promoted.\n\n'
+
+  printf 'CLI entrypoints\n'
+  printf '  Chat/TUI:        '
+  if [[ "$AGENT" == "openclaw" ]]; then
+    printf 'openclaw %s tui\n' "$OPENCLAW_PROFILE_FLAG"
+  else
+    printf 'hermes\n'
+  fi
+  printf '  Gateway status:  %s gateway status\n' "$(agent_cmd)"
+  printf '  Cron list:       %s cron list\n' "$(agent_cmd)"
+  printf '  Sessions:        %s sessions%s\n' "$(agent_cmd)" "$([[ "$AGENT" == hermes ]] && printf ' list' || true)"
+
+  printf '\nPorts and pages\n'
+  if [[ -n "$WEB_PORT" ]]; then
+    printf '  MBP local page:      http://127.0.0.1:%s/\n' "$WEB_PORT"
+    if command -v tailscale >/dev/null 2>&1; then
+      local tip
+      tip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+      [[ -n "$tip" ]] && printf '  Tailscale direct:    http://%s:%s/\n' "$tip" "$WEB_PORT"
+    fi
+  fi
+  [[ -n "$GATEWAY_PORT" ]] && printf '  Gateway port:        %s\n' "$GATEWAY_PORT"
+  [[ -n "$BROWSER_PORT" ]] && printf '  Browser/control:     %s\n' "$BROWSER_PORT"
+  if [[ "$AGENT" == "openclaw" ]]; then
+    cat <<'OCURL'
+
+OpenClaw remote-view safety:
+  Current recommended iMac path is an SSH/Tailscale tunnel, not broad unauthenticated exposure:
+    ssh -N -L 19001:127.0.0.1:19001 -L 19003:127.0.0.1:19003 openclaw-mbp
+  Then browse on iMac:
+    http://127.0.0.1:19001/
+  Direct tailnet exposure should use token auth, not --auth none.
+OCURL
+  fi
+
+  printf '\nHost gateway process baseline\n'
+  printf '  Shows both durable Hermes production gateway and OpenClaw dev gateway when present.\n'
+  ps axo pid,ppid,rss,vsz,etime,comm,args | python3 -c '
+import sys
+for line in sys.stdin:
+    parts=line.split(None,6)
+    if len(parts) >= 7:
+        pid,ppid,rss,vsz,etime,comm,args=parts
+        is_hermes = " -m hermes_cli.main gateway " in args and " -c " not in args
+        is_openclaw = "openclaw-gateway" in args and " -c " not in args
+        if not (is_hermes or is_openclaw):
+            continue
+        label = "hermes-prod-gateway" if is_hermes else "openclaw-dev-gateway"
+        print(f"  {label}: pid={pid} ppid={ppid} rss={int(rss)/1024:.1f}MB elapsed={etime} cmd={comm} {args[:90]}")
+' || true
+
+  if [[ "$AGENT" == "hermes" ]] && command -v hermes-health >/dev/null 2>&1; then
+    printf '\nHermes health snapshot\n'
+    hermes-health 2>&1 | sed -n '1,90p' || true
+  fi
+}
+
+show_gateway() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    openclaw $OPENCLAW_PROFILE_FLAG gateway status 2>&1 || true
+    cat <<'OCG'
+
+Useful OpenClaw gateway commands:
+  openclaw --dev gateway status
+  openclaw --dev gateway health
+  openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact
+  openclaw --dev gateway run --port 19001 --bind tailnet --auth token --allow-unconfigured --verbose --compact
+  openclaw --dev dashboard --no-open
+  openclaw --dev logs --limit 120 --plain
+
+Safety:
+  Loopback is safest. Use SSH/Tailscale forwarding to view from iMac.
+  If exposing directly to the tailnet, prefer auth=token and never paste tokens into visible panes.
+OCG
+  else
+    hermes gateway status 2>&1 || true
+    cat <<'HG'
+
+Useful Hermes gateway commands:
+  hermes gateway status
+  hermes gateway start
+  hermes gateway stop
+  hermes gateway restart
+  tail -n 80 ~/.hermes/logs/gateway.log
+  tail -n 120 ~/.hermes/logs/gateway.error.log
+
+Safety:
+  Hermes is currently the stable launchd-owned production gateway. Do not run a second long-lived foreground gateway unless debugging.
+  If Discord shows repeated 429/503/no healthy upstream/overflow errors, do NOT restart-loop.
+  Break the launchd retry loop, wait for cooldown, then start once:
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.hermes.gateway.plist 2>/dev/null || true
+    # wait at least 5 minutes, then:
+    hermes gateway start
+HG
+  fi
+}
+
+show_hermes_cron_routes() {
+  HERMES_HOME="$HERMES_HOME" python3 - <<'PY' 2>/dev/null || true
+import json, os
+from pathlib import Path
+
+home = Path(os.environ.get('HERMES_HOME') or (Path.home()/'.hermes'))
+jobs_path = home/'cron/jobs.json'
+out_root = home/'cron/output'
+if not jobs_path.exists():
+    print('cron registry not found:', jobs_path)
+    raise SystemExit
+
+jobs = json.loads(jobs_path.read_text()).get('jobs', [])
+print('Cron route + latest-output summary')
+for j in jobs:
+    if not j.get('enabled', True):
+        continue
+    jid = j.get('id') or '<no-id>'
+    name = j.get('name') or '<unnamed>'
+    provider = j.get('provider')
+    model = j.get('model')
+    route = '/'.join(str(x) for x in (provider, model) if x) or '<inherits default>'
+    last_status = j.get('last_status') or '<never>'
+    last_error = j.get('last_error') or ''
+    stale_gemini = 'gemini' in last_error.lower() and 'gemini' not in route.lower()
+    active_gemini = 'gemini' in route.lower()
+    output_dir = out_root/jid
+    files = sorted(output_dir.glob('*.md'), key=lambda p: p.stat().st_mtime, reverse=True) if output_dir.exists() else []
+    latest = str(files[0]) if files else '<no output file>'
+    mutating = any(word in name.lower() for word in ['sync', 'archive', 'git', 'deploy', 'publish'])
+    if active_gemini:
+        flag = 'RED active Gemini route'
+    elif stale_gemini:
+        flag = 'YELLOW stale Gemini last_error'
+    elif str(last_status).lower() == 'error':
+        flag = 'RED last run errored'
+    else:
+        flag = 'OK'
+    side = '  SIDE-EFFECTS' if mutating else ''
+    print(f'- {jid}  {name}{side}')
+    print(f'  route={route}  last={last_status}  {flag}')
+    print(f'  next={j.get("next_run_at")}')
+    print(f'  latest_output={latest}')
+PY
+}
+
+show_cron() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    openclaw $OPENCLAW_PROFILE_FLAG cron status 2>&1 || true
+    printf '\n'
+    openclaw $OPENCLAW_PROFILE_FLAG cron list 2>&1 || true
+    cat <<'OCC'
+
+Useful OpenClaw cron commands:
+  openclaw --dev cron list
+  openclaw --dev cron show <id>
+  openclaw --dev cron run <id>
+  openclaw --dev cron runs <id>
+  openclaw --dev cron enable|disable <id>
+OCC
+  else
+    hermes cron status 2>&1 || true
+    printf '\n'
+    hermes cron list 2>&1 || true
+    printf '\n'
+    show_hermes_cron_routes
+    cat <<'HCRON'
+
+Useful Hermes cron commands:
+  hermes cron list
+  hermes cron status
+  hermes cron edit <job_id>
+  hermes cron run <job_id>
+  hermes cron pause|resume <job_id>
+
+Cron amendment flow:
+  hermes cron edit <job_id> --schedule '0 22 * * *'
+  hermes cron edit <job_id> --prompt 'new full prompt'
+  hermes cron edit <job_id> --name 'new name'
+  hermes cron edit <job_id> --workdir /absolute/path
+HCRON
+  fi
+}
+
+show_sessions() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    openclaw $OPENCLAW_PROFILE_FLAG sessions --all-agents 2>&1 | sed -n '1,120p' || true
+    cat <<'OCS'
+
+Useful OpenClaw session commands:
+  openclaw --dev sessions
+  openclaw --dev sessions --all-agents
+  openclaw --dev sessions --active 120
+  openclaw --dev sessions cleanup
+OCS
+  else
+    hermes sessions list 2>&1 | sed -n '1,80p' || true
+    printf '\n'
+    hermes sessions stats 2>&1 | sed -n '1,40p' || true
+    cat <<'HS'
+
+Useful Hermes session commands:
+  hermes sessions list
+  hermes sessions browse
+  hermes sessions stats
+  hermes sessions export /tmp/hermes-sessions.jsonl
+HS
+  fi
+  printf '\nLive related processes\n'
+  ps axww -o pid,ppid,etime,command | grep -E 'hermes_cli|openclaw-gateway|/usr/local/bin/openclaw|mission-agent-pane|mission-pane' | grep -v grep | sed -n '1,80p' || true
+  cat <<'CLEANUP'
+
+Safe stale cleanup rule:
+  1. Inspect first. Keep the launchd-owned Hermes gateway alive unless intentionally restarting it.
+  2. Stop only obviously stale CLI/TUI/dev gateway PIDs:
+       kill -TERM <pid>
+       sleep 3
+       ps -p <pid> -o pid,etime,command
+       kill -KILL <pid>    # only if TERM failed
+  3. For Hermes orphaned SQLite rows, close abandoned sessions without deleting history and exclude the active session:
+       sqlite3 ~/.hermes/state.db "UPDATE sessions SET ended_at = strftime('%s','now'), end_reason = 'user_canceled_cleanup' WHERE ended_at IS NULL AND id != '<active_session_id>';"
+CLEANUP
+}
+
+show_heartbeat() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    openclaw $OPENCLAW_PROFILE_FLAG system presence 2>&1 | sed -n '1,100p' || true
+    printf '\nOpenClaw heartbeat commands:\n'
+    printf '  openclaw --dev system heartbeat --help\n'
+    printf '  openclaw --dev system event --help\n'
+  else
+    printf 'Hermes launchd heartbeat\n'
+    launchctl list 2>/dev/null | grep -E 'ai\.hermes\.heartbeat|ai\.hermes\.gateway' || true
+    printf '\nRecent heartbeat logs\n'
+    latest="$(ls -t "$HERMES_HOME"/workspace/logs/heartbeat/*.md 2>/dev/null | head -1 || true)"
+    if [[ -n "$latest" ]]; then
+      printf 'Latest: %s\n\n' "$latest"
+      tail -n 80 "$latest" 2>/dev/null || true
+    else
+      printf 'No heartbeat vault log found.\n'
+    fi
+  fi
+}
+
+show_ports() {
+  if command -v ports >/dev/null 2>&1; then
+    ports 2>&1 | sed -n '1,140p'
+  else
+    lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | sed -n '1,140p'
+  fi
+  printf '\nPort-specific probes:\n'
+  [[ -n "$WEB_PORT" ]] && printf '  port-who %s\n' "$WEB_PORT"
+  [[ -n "$GATEWAY_PORT" ]] && printf '  port-who %s\n' "$GATEWAY_PORT"
+  [[ -n "$BROWSER_PORT" ]] && printf '  port-who %s\n' "$BROWSER_PORT"
+}
+
+show_secrets() {
+  printf 'Safe credential readiness only. This page must not print tokens, env dumps, private key material, or op item values.\n\n'
+  printf '1Password CLI\n'
+  if command -v op >/dev/null 2>&1; then
+    if op whoami >/tmp/mission-agent-op.$$ 2>&1; then
+      user_type="$(sed -n 's/^User Type:[[:space:]]*//p' /tmp/mission-agent-op.$$ | head -1)"
+      printf '  installed: yes\n'
+      printf '  authenticated: yes%s\n' "${user_type:+ ($user_type)}"
+    else
+      printf '  installed: yes\n'
+      printf '  authenticated: no\n'
+    fi
+    rm -f /tmp/mission-agent-op.$$
+  else
+    printf '  installed: no\n'
+  fi
+
+  printf '\nService account env\n'
+  if [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]]; then
+    printf '  OP_SERVICE_ACCOUNT_TOKEN: set (value hidden)\n'
+  else
+    printf '  OP_SERVICE_ACCOUNT_TOKEN: unset in this pane\n'
+    printf '  If expected, refresh tmux env or load from your shell/launch context.\n'
+  fi
+
+  printf '\nSSH agent\n'
+  if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+    printf '  SSH_AUTH_SOCK: unset\n'
+  else
+    printf '  SSH_AUTH_SOCK: set\n'
+    [[ -S "$SSH_AUTH_SOCK" ]] && printf '  socket: reachable\n' || printf '  socket: not reachable\n'
+  fi
+  out="$(ssh-add -l 2>&1 || true)"
+  if printf '%s\n' "$out" | grep -qi 'no identities'; then
+    printf '  identities: 0 loaded\n'
+  elif printf '%s\n' "$out" | grep -Eq 'SHA256|ssh-ed25519|RSA|ED25519'; then
+    count="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+    printf '  identities: %s loaded (fingerprints hidden)\n' "$count"
+  else
+    printf '  identities: status unclear\n'
+  fi
+}
+
+follow_logs() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    mkdir -p "$(dirname "$OPENCLAW_LOG_FILE")"
+    touch "$OPENCLAW_LOG_FILE"
+    header "logs"
+    printf 'Following OpenClaw file log: %s\n' "$OPENCLAW_LOG_FILE"
+    printf 'For RPC log tail: openclaw --dev logs --follow --plain\n'
+    printf 'Reasoning/tool visibility: use verbose/raw-stream flags only where supported. Hidden model chain-of-thought is not guaranteed or exposed.\n'
+    hr
+    tail -n 120 -F "$OPENCLAW_LOG_FILE"
+  else
+    mkdir -p "$HERMES_LOG_DIR"
+    touch "$HERMES_LOG_DIR/gateway.log" "$HERMES_LOG_DIR/gateway.error.log"
+    header "logs"
+    printf 'Following Hermes gateway + error logs.\n'
+    printf 'Reasoning/tool visibility: in chat, use /verbose and /reasoning show if available; logs show tool/platform/runtime events, not hidden model chain-of-thought.\n'
+    hr
+    tail -n 80 -F "$HERMES_LOG_DIR/gateway.log" "$HERMES_LOG_DIR/gateway.error.log"
+  fi
+}
+
+open_chat() {
+  header "chat"
+  printf 'Starting %s interactive CLI/TUI...\n' "$AGENT"
+  printf 'Navigation stays tmux-level: Ctrl-b w picker, Ctrl-b 1 overview, Ctrl-b z zoom.\n\n'
+  if [[ "$AGENT" == "openclaw" ]]; then
+    exec openclaw $OPENCLAW_PROFILE_FLAG tui
+  else
+    exec hermes
+  fi
+}
+
+open_shell() {
+  header "$PAGE shell"
+  printf 'Scratch/control shell for %s.\n\n' "$AGENT"
+  case "$PAGE" in
+    gateway) printf 'Try: %s gateway status\n' "$(agent_cmd)" ;;
+    cron) printf 'Try: %s cron list\n' "$(agent_cmd)" ;;
+    sessions) printf 'Try: %s sessions%s\n' "$(agent_cmd)" "$([[ "$AGENT" == hermes ]] && printf ' list' || true)" ;;
+    heartbeat) printf 'Try: %s system heartbeat --help  # OpenClaw only\n' "$(agent_cmd)" ;;
+    ports) printf 'Try: ports ; port-who <port>\n' ;;
+    secrets) printf 'Try: op whoami ; echo ${OP_SERVICE_ACCOUNT_TOKEN:+OP token set}; echo ${SSH_AUTH_SOCK:+SSH sock set}\n' ;;
+    logs) printf 'Try: tail -F <log-file>\n' ;;
+    *) printf 'Try: %s --help ; ports ; pwd\n' "$(agent_cmd)" ;;
+  esac
+  printf '\n'
+  exec zsh -l
+}
+
+case "$ROLE" in
+  chat) open_chat ;;
+  overview) loop "overview" 20 show_overview ;;
+  gateway) loop "gateway" 15 show_gateway ;;
+  cron) loop "cron" 30 show_cron ;;
+  sessions) loop "sessions" 45 show_sessions ;;
+  heartbeat) loop "heartbeat" 45 show_heartbeat ;;
+  ports) loop "ports" 20 show_ports ;;
+  secrets|security) loop "secrets readiness" 60 show_secrets ;;
+  logs) follow_logs ;;
+  guide) loop "shortcuts" 60 show_page_guide ;;
+  shell) open_shell ;;
+  scratch) open_shell ;;
+  *) printf 'Unknown mission-agent-pane role: %s\n' "$ROLE" >&2; exit 2 ;;
+esac

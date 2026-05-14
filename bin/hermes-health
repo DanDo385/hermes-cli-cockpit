@@ -5,9 +5,13 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 LOG_DIR="$HERMES_HOME/logs"
 GATEWAY_ERROR_LOG="$LOG_DIR/gateway.error.log"
 
+HEALTH_BAD=0
+HEALTH_WARN=0
+NEXT_ACTION="Monitor. Gateway and cron are healthy."
+
 status_ok() { printf '%-18s %s\n' "$1:" "✅ $2"; }
-status_warn() { printf '%-18s %s\n' "$1:" "⚠️  $2"; }
-status_bad() { printf '%-18s %s\n' "$1:" "❌ $2"; }
+status_warn() { HEALTH_WARN=$((HEALTH_WARN + 1)); [[ "$NEXT_ACTION" == Monitor.* ]] && NEXT_ACTION="Review warning: $1 - $2"; printf '%-18s %s\n' "$1:" "⚠️  $2"; }
+status_bad() { HEALTH_BAD=$((HEALTH_BAD + 1)); NEXT_ACTION="Act now: $1 - $2"; printf '%-18s %s\n' "$1:" "❌ $2"; }
 status_info() { printf '%-18s %s\n' "$1:" "ℹ️  $2"; }
 
 count_ports() {
@@ -30,8 +34,14 @@ check_gateway() {
     else
       status_ok gateway "loaded"
     fi
+  elif printf '%s\n' "$out" | grep -qi 'Gateway service is not loaded'; then
+    if [[ -f "$GATEWAY_ERROR_LOG" ]] && tail -n 500 "$GATEWAY_ERROR_LOG" 2>/dev/null | grep -Eq 'discord connect timed out|503 Service Unavailable|no healthy upstream|HTTP 429|rate.?limit'; then
+      status_bad gateway "launchd not loaded; recent Discord connect/rate-limit failure, left stopped to avoid retry loop"
+    else
+      status_bad gateway "launchd service not loaded; run: hermes gateway start"
+    fi
   else
-    status_bad gateway "not loaded or status unclear"
+    status_bad gateway "status unclear; run: hermes gateway status"
   fi
 }
 
@@ -43,7 +53,9 @@ check_cron() {
 
   local out
   out="$(hermes cron status 2>&1 || true)"
-  if printf '%s\n' "$out" | grep -qi 'running'; then
+  if printf '%s\n' "$out" | grep -qi 'Gateway is not running\|will NOT fire'; then
+    status_bad cron "gateway down; automatic jobs will NOT fire"
+  elif printf '%s\n' "$out" | grep -qi 'running'; then
     status_ok cron "running"
   elif printf '%s\n' "$out" | grep -qi 'active'; then
     status_ok cron "active"
@@ -148,23 +160,43 @@ check_ports() {
 }
 
 main() {
+  local tmp overall
+  tmp="$(mktemp)"
+
+  {
+    check_gateway
+    check_cron
+    check_cron_models
+    check_gemini_history
+    check_onepassword
+    check_ssh_agent
+    check_ports
+  } >"$tmp"
+
+  if [[ "$HEALTH_BAD" -gt 0 ]]; then
+    overall="DEGRADED"
+  elif [[ "$HEALTH_WARN" -gt 0 ]]; then
+    overall="WATCH"
+  else
+    overall="HEALTHY"
+  fi
+
   printf 'Hermes CLI Cockpit Health\n'
   printf 'Host: %s\n' "$(hostname)"
   printf 'Time: %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+  printf 'Overall: %s\n' "$overall"
+  printf 'Next: %s\n' "$NEXT_ACTION"
   printf '\n'
-
-  check_gateway
-  check_cron
-  check_cron_models
-  check_gemini_history
-  check_onepassword
-  check_ssh_agent
-  check_ports
+  cat "$tmp"
+  rm -f "$tmp"
 
   printf '\nHints:\n'
-  printf '  tmux windows: Ctrl-b w for picker, Ctrl-b n next, Ctrl-b p previous\n'
+  printf '  tmux windows: Ctrl-b w picker, Ctrl-b n/p next/prev, Ctrl-b z zoom\n'
   printf '  direct window jump: Ctrl-b <number shown in the bottom bar>\n'
-  printf '  inspect ports: ports | port-who <port>\n'
+  printf '  gateway triage: Ctrl-b 2, hermes gateway status, tail -n 120 ~/.hermes/logs/gateway.error.log\n'
+  printf '  cron amendments: Ctrl-b 3, hermes cron edit|pause|resume|run <job_id>\n'
+  printf '  stale sessions: Ctrl-b 4, inspect PIDs before kill -TERM <pid>\n'
+  printf '  inspect ports: Ctrl-b 6, ports | port-who <port>\n'
 }
 
 main "$@"

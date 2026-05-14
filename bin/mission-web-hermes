@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_DIR="${MISSION_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+PORT="${MISSION_WEB_PORT:-4173}"
+BIND="${MISSION_WEB_BIND:-0.0.0.0}"
+ROOT="$REPO_DIR/web/hermes"
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "mission-web-hermes: port $PORT is already listening; not replacing it." >&2
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >&2 || true
+  exit 1
+fi
+exec python3 -m http.server "$PORT" --bind "$BIND" --directory "$ROOT"

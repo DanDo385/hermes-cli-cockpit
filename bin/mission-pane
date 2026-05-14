@@ -1,0 +1,371 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+LOG_DIR="$HERMES_HOME/logs"
+REPO_DIR="${MISSION_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+ROLE="${1:-overview}"
+
+hr() { printf '%*s\n' "${COLUMNS:-100}" '' | tr ' ' '-'; }
+header() {
+  clear
+  printf 'Hermes CLI Cockpit :: %s\n' "$1"
+  printf 'Host: %s   Time: %s\n' "$(hostname)" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+  hr
+  printf '\n'
+}
+loop() {
+  local title="$1" delay="$2"
+  shift 2
+  while true; do
+    header "$title"
+    "$@" 2>&1 || true
+    printf '\n'
+    hr
+    printf 'Refresh: every %ss   Exit pane command: Ctrl-c   Detach tmux: Ctrl-b d   Zoom: Ctrl-b z\n' "$delay"
+    sleep "$delay"
+  done
+}
+show_guide_compact() {
+  cat <<'GUIDE'
+YOU ARE HERE
+  0 chat      talk to Hermes here
+  1 overview  health + runbook
+  2 gateway   Discord/API gateway + logs
+  3 cron      scheduler + jobs + outputs
+  4 sessions  recent/stale session cleanup
+  5 security  safe credential readiness
+  6 ports     local listeners + conflicts
+  7 scratch   blank shells
+
+KEYS
+  Ctrl-b w    page picker
+  Ctrl-b z    zoom current pane
+  Ctrl-b d    detach safely
+  Ctrl-b 0-7  jump to page
+
+READING RULE
+  Green = healthy. Yellow = watch. Red = act now.
+GUIDE
+}
+show_guide_full() {
+  cat <<'GUIDE'
+What this cockpit is for:
+  A terminal dashboard for Hermes operations on the MBP control plane.
+  Think of each tmux WINDOW as a page, and each PANE as a card on that page.
+
+First minute:
+  1. Start in 0 chat. Type to Hermes in the big pane.
+  2. Check the live health card. If red, jump to the named page.
+  3. Use Ctrl-b z to zoom noisy panes like cron jobs or logs.
+  4. Detach with Ctrl-b d. The cockpit keeps running.
+
+Pages:
+  0 chat       Hermes conversation + compact health/map
+  1 overview   full health + operator runbook
+  2 gateway    launchd gateway state, Discord/API logs, errors, commands
+  3 cron       scheduler status, job list, latest outputs, amendment commands
+  4 sessions   recent sessions, stale process/session cleanup commands
+  5 security   safe 1Password/SSH readiness only, no secret values
+  6 ports      local listening services and port ownership
+  7 scratch    blank shells for manual work
+
+Navigation:
+  Ctrl-b w        page/window picker
+  Ctrl-b n / p    next / previous page
+  Ctrl-b 0..9     jump to numbered page from bottom bar
+  Ctrl-b arrows   move pane focus
+  Ctrl-b z        zoom/unzoom the current pane
+  Ctrl-b d        detach safely
+GUIDE
+}
+show_runbook() {
+  cat <<'RUNBOOK'
+Operator runbook
+
+Gateway red:
+  hermes gateway status
+  tail -n 80 ~/.hermes/logs/gateway.log
+  tail -n 120 ~/.hermes/logs/gateway.error.log
+  hermes gateway start
+
+Discord 429/503/no healthy upstream repeating:
+  Do NOT restart-loop. Break launchd retry, wait, then start once:
+  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.hermes.gateway.plist 2>/dev/null || true
+  # wait at least 5 minutes
+  hermes gateway start
+
+Cron not firing:
+  hermes cron status
+  hermes gateway status
+  # cron fires from gateway; fix gateway first
+
+Cron amend flow:
+  hermes cron list
+  hermes cron edit <job_id> --schedule '0 22 * * *'
+  hermes cron edit <job_id> --prompt 'new full prompt'
+  hermes cron pause|resume|run|remove <job_id>
+
+Stale sessions/processes:
+  Use the sessions page. Inspect first, kill only stale CLI/TUI processes, never the launchd gateway PID.
+
+Security warning:
+  This cockpit shows credential readiness only. Deep secret debugging belongs in a coding-review/dev tmux, not this always-on ops dashboard.
+RUNBOOK
+}
+show_gateway_status() {
+  local out pid last_exit
+  out="$(hermes gateway status 2>&1 || true)"
+  printf '%s\n' "$out"
+  pid="$(printf '%s\n' "$out" | sed -n 's/.*"PID" = \([0-9][0-9]*\).*/\1/p' | head -1)"
+  last_exit="$(printf '%s\n' "$out" | sed -n 's/.*"LastExitStatus" = \([0-9][0-9]*\).*/\1/p' | head -1)"
+
+  printf '\nInterpretation:\n'
+  if printf '%s\n' "$out" | grep -qi 'Gateway service is not loaded'; then
+    printf '  launchd service plist exists, but launchd is not supervising the gateway.\n'
+    printf '  Discord/API delivery and gateway-owned cron dispatch are OFF.\n'
+  elif printf '%s\n' "$out" | grep -qi 'Gateway service is loaded'; then
+    if [[ -n "$pid" ]]; then
+      printf '  launchd loaded + PID %s = gateway process is running.\n' "$pid"
+    else
+      printf '  launchd loaded but no PID found = service is registered, but process may not be alive.\n'
+    fi
+    if [[ -n "$last_exit" && "$last_exit" != "0" ]]; then
+      printf '  LastExitStatus=%s means the previous gateway run failed. Inspect error log.\n' "$last_exit"
+    fi
+  else
+    printf '  Hermes could not classify gateway state. Inspect launchctl and logs.\n'
+  fi
+
+  printf '\nHealthy signs in gateway.log:\n'
+  printf '  [Discord] Connected as Hermes#3922\n'
+  printf '  ✓ discord connected\n'
+  printf '  Gateway running with 1 platform(s)\n'
+  printf '  Cron ticker started\n'
+
+  printf '\nUseful actions:\n'
+  printf '  hermes gateway status\n'
+  printf '  tail -n 80 ~/.hermes/logs/gateway.log\n'
+  printf '  tail -n 120 ~/.hermes/logs/gateway.error.log\n'
+  printf '  hermes gateway start       # normal start/load path\n'
+  printf '  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.hermes.gateway.plist  # stop retry loop only\n'
+}
+show_cron_routes() {
+  python3 - <<'PY' 2>/dev/null || true
+import json
+from pathlib import Path
+jobs_path = Path.home()/'.hermes/cron/jobs.json'
+out_root = Path.home()/'.hermes/cron/output'
+if not jobs_path.exists():
+    print('cron registry not found:', jobs_path)
+    raise SystemExit
+jobs = json.loads(jobs_path.read_text()).get('jobs', [])
+print('Cron route + latest-output summary')
+for j in jobs:
+    if not j.get('enabled', True):
+        continue
+    jid = j.get('id') or '<no-id>'
+    name = j.get('name') or '<unnamed>'
+    provider = j.get('provider')
+    model = j.get('model')
+    route = '/'.join(str(x) for x in (provider, model) if x) or '<inherits default>'
+    last_status = j.get('last_status') or '<never>'
+    last_error = j.get('last_error') or ''
+    stale_gemini = 'gemini' in last_error.lower() and 'gemini' not in route.lower()
+    active_gemini = 'gemini' in route.lower()
+    files = sorted((out_root/jid).glob('*.md'), key=lambda p: p.stat().st_mtime, reverse=True) if (out_root/jid).exists() else []
+    latest = str(files[0]) if files else '<no output file>'
+    mutating = any(word in name.lower() for word in ['sync', 'archive', 'git', 'deploy', 'publish'])
+    if active_gemini:
+        flag = 'RED active Gemini route'
+    elif stale_gemini:
+        flag = 'YELLOW stale Gemini last_error'
+    elif str(last_status).lower() == 'error':
+        flag = 'RED last run errored'
+    else:
+        flag = 'OK'
+    side = '  SIDE-EFFECTS' if mutating else ''
+    print(f'- {jid}  {name}{side}')
+    print(f'  route={route}  last={last_status}  {flag}')
+    print(f'  next={j.get("next_run_at")}')
+    print(f'  latest_output={latest}')
+PY
+}
+show_cron() {
+  hermes cron status 2>&1 || true
+  printf '\n'
+  hermes cron list 2>&1 || true
+  printf '\n'
+  show_cron_routes
+  printf '\nCron amendment commands, run in the Cron shell pane:\n'
+  printf '  hermes cron edit <job_id> --schedule '\''0 22 * * *'\''\n'
+  printf '  hermes cron edit <job_id> --prompt '\''new full prompt'\''\n'
+  printf '  hermes cron edit <job_id> --name '\''new name'\''\n'
+  printf '  hermes cron edit <job_id> --workdir /absolute/path\n'
+  printf '  hermes cron pause <job_id>\n'
+  printf '  hermes cron resume <job_id>\n'
+  printf '  hermes cron run <job_id>\n'
+  printf '  hermes cron remove <job_id>\n'
+  printf '\nLimitation: current hermes cron edit does not expose --model/--provider.\n'
+  printf 'Route changes need a future first-class command or careful registry surgery.\n'
+}
+show_sessions() {
+  printf 'Recent sessions\n'
+  hermes sessions list 2>&1 | sed -n '1,45p' || true
+  printf '\nSession store stats\n'
+  hermes sessions stats 2>&1 | sed -n '1,30p' || true
+  printf '\nLive Hermes-ish processes\n'
+  ps axww -o pid,ppid,etime,command | grep -E 'hermes_cli|/\.local/bin/hermes|tui_gateway|ui-tui|mission-pane' | grep -v grep | sed -n '1,40p' || true
+  printf '\nSafe stale cleanup runbook\n'
+  cat <<'CLEANUP'
+1. Inspect first. Keep launchd gateway alive if it is the owner:
+     hermes gateway status
+     ps axww -o pid,ppid,etime,command | grep -E 'hermes_cli|/\.local/bin/hermes|tui_gateway|ui-tui' | grep -v grep
+
+2. Stop only an obviously stale CLI/TUI PID, never the launchd gateway PID:
+     kill -TERM <pid>
+     sleep 3
+     ps -p <pid> -o pid,etime,command
+     kill -KILL <pid>        # only if TERM failed
+
+3. Close orphaned SQLite session rows without deleting history.
+   Replace <active_session_id> with the session you are currently using:
+     sqlite3 ~/.hermes/state.db "UPDATE sessions SET ended_at = strftime('%s','now'), end_reason = 'user_canceled_cleanup' WHERE ended_at IS NULL AND id != '<active_session_id>';"
+
+4. If gateway/cron looks stale, restart the launchd-owned gateway, not random Python children:
+     hermes gateway status
+     hermes gateway start
+     hermes cron status
+CLEANUP
+}
+show_security() {
+  printf 'Security readiness only: no secret values, account names, key comments, or env values displayed.\n\n'
+  printf '1Password CLI\n'
+  if command -v op >/dev/null 2>&1; then
+    if op whoami >/tmp/mission-op-whoami.$$ 2>&1; then
+      user_type="$(sed -n 's/^User Type:[[:space:]]*//p' /tmp/mission-op-whoami.$$ | head -1)"
+      printf '  installed: yes\n'
+      printf '  authenticated: yes%s\n' "${user_type:+ ($user_type)}"
+    else
+      printf '  installed: yes\n'
+      printf '  authenticated: no\n'
+    fi
+    rm -f /tmp/mission-op-whoami.$$
+  else
+    printf '  installed: no\n'
+  fi
+
+  printf '\nSSH agent\n'
+  if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+    printf '  SSH_AUTH_SOCK: unset\n'
+    printf '  identities: unavailable\n'
+  else
+    printf '  SSH_AUTH_SOCK: set\n'
+    if [[ -S "$SSH_AUTH_SOCK" ]]; then
+      printf '  socket: reachable\n'
+    else
+      printf '  socket: not reachable from this pane\n'
+    fi
+    out="$(ssh-add -l 2>&1 || true)"
+    if printf '%s\n' "$out" | grep -qi 'no identities'; then
+      printf '  identities: 0 loaded\n'
+    elif printf '%s\n' "$out" | grep -Eq 'SHA256|ssh-ed25519|RSA|ED25519'; then
+      count="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+      printf '  identities: %s loaded (fingerprints hidden)\n' "$count"
+    else
+      printf '  identities: status unclear\n'
+    fi
+  fi
+
+  printf '\nPlacement decision\n'
+  printf '  Keep this page as ops readiness. Move deep secret debugging to coding-review/dev tmux.\n'
+  printf '  Avoid env dumps, op item get, token prints, and raw ssh-add -l in this always-on cockpit.\n'
+}
+show_ports() {
+  if command -v ports >/dev/null 2>&1; then
+    ports 2>&1 | sed -n '1,100p'
+  else
+    printf 'ports command missing. Expected symlink: ~/.local/bin/ports -> %s/bin/ports\n' "$REPO_DIR"
+  fi
+}
+open_hermes_chat() {
+  header "Hermes chat"
+  printf 'This is the main cockpit pane. Type to Hermes here.\n'
+  printf 'Use Ctrl-b 1 for overview, Ctrl-b 2 for gateway logs, Ctrl-b w for page picker.\n'
+  printf '\nStarting Hermes...\n\n'
+  exec hermes
+}
+open_shell() {
+  local title="$1" kind="${2:-generic}"
+  header "$title"
+  printf 'Interactive shell pane for %s.\n\n' "$kind"
+  case "$kind" in
+    gateway)
+      printf 'Useful commands:\n  hermes gateway status\n  hermes gateway start\n  tail -n 80 ~/.hermes/logs/gateway.log\n  tail -n 120 ~/.hermes/logs/gateway.error.log\n'
+      ;;
+    cron)
+      printf 'Useful commands:\n  hermes cron status\n  hermes cron list\n  hermes cron edit <job_id> --schedule '\''0 22 * * *'\''\n  hermes cron pause|resume|run <job_id>\n'
+      ;;
+    sessions)
+      printf 'Useful commands:\n  hermes sessions list\n  hermes sessions stats\n  ps axww -o pid,ppid,etime,command | grep -E '\''hermes_cli|/\\.local/bin/hermes|tui_gateway'\''\n  kill -TERM <stale_pid>\n'
+      ;;
+    security)
+      printf 'Security warning: avoid printing secrets in this visible pane.\nUseful commands:\n  op whoami\n  ssh-add -l\n  echo ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK=set}\n'
+      ;;
+    ports)
+      printf 'Useful commands:\n  ports\n  port-who <port>\n  lsof -nP -iTCP -sTCP:LISTEN\n'
+      ;;
+    *)
+      printf 'Useful commands:\n  hermes-health\n  hermes gateway status\n  hermes cron status\n  ports\n'
+      ;;
+  esac
+  printf '\n'
+  exec zsh -l
+}
+follow_log() {
+  local title="$1" file="$2" kind="${3:-generic}"
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  header "$title"
+  printf 'Following: %s\n' "$file"
+  case "$kind" in
+    gateway-log)
+      printf '\nThis is the normal gateway lifecycle log. Healthy startup shows:\n'
+      printf '  [Discord] Connected as Hermes#3922\n  ✓ discord connected\n  Gateway running with 1 platform(s)\n  Cron ticker started\n'
+      printf 'Quiet after startup can be normal. Check gateway status for PID.\n'
+      ;;
+    gateway-errors)
+      printf '\nThis is stderr/error output. Old errors remain here, so compare timestamps.\n'
+      printf 'Act on recent repeated: 429, 503, no healthy upstream, connect timed out, Gateway failed.\n'
+      printf 'If gateway.log now shows Connected as Hermes#3922, older errors are historical.\n'
+      ;;
+  esac
+  printf '\nTip: Ctrl-c stops the live follow in this pane only.\n'
+  hr
+  tail -n 80 -F "$file"
+}
+
+case "$ROLE" in
+  hermes-chat) open_hermes_chat ;;
+  overview) loop "overview health" 20 hermes-health ;;
+  guide|guide-full) loop "operator map + runbook" 60 show_guide_full ;;
+  guide-compact) loop "compact operator map" 60 show_guide_compact ;;
+  runbook) loop "operator runbook" 60 show_runbook ;;
+  gateway-status) loop "gateway status" 15 show_gateway_status ;;
+  gateway-log) follow_log "gateway normal log" "$LOG_DIR/gateway.log" gateway-log ;;
+  gateway-errors) follow_log "gateway error log" "$LOG_DIR/gateway.error.log" gateway-errors ;;
+  gateway-shell) open_shell "gateway command shell" gateway ;;
+  cron) loop "cron scheduler + jobs" 30 show_cron ;;
+  sessions) loop "sessions + stale cleanup" 45 show_sessions ;;
+  security|secrets) loop "security readiness" 60 show_security ;;
+  ports) loop "local listening ports" 20 show_ports ;;
+  cron-shell) open_shell "cron command shell" cron ;;
+  sessions-shell) open_shell "sessions command shell" sessions ;;
+  security-shell) open_shell "security command shell" security ;;
+  ports-shell) open_shell "ports command shell" ports ;;
+  scratch) open_shell "scratch shell" generic ;;
+  *)
+    printf 'Unknown mission-pane role: %s\n' "$ROLE" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${MISSION_SESSION:?MISSION_SESSION is required}"
+TITLE="${MISSION_TITLE:?MISSION_TITLE is required}"
+AGENT="${MISSION_AGENT:?MISSION_AGENT is required}"
+REPO_DIR="${MISSION_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+PANE="$REPO_DIR/bin/mission-agent-pane"
+NO_ATTACH=0
+RESET=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-attach) NO_ATTACH=1 ;;
+    --reset|--rebuild) RESET=1 ;;
+    -h|--help)
+      cat <<HELP
+mission-agent: generic tmux cockpit launcher
+
+Usage:
+  mission-hermes              create/attach Hermes mission control
+  mission-hermes --no-attach  create/verify without attaching
+  mission-hermes --reset      rebuild layout
+  mission-openclaw            create/attach OpenClaw mission control
+  mission-openclaw --reset    rebuild layout
+
+Windows:
+  0 chat       main AI CLI/TUI chat
+  1 overview   health, URLs, process summary
+  2 gateway    gateway status/control hints
+  3 cron       scheduler/jobs
+  4 sessions   stored sessions/processes
+  5 heartbeat  heartbeat/system events
+  6 ports      port ownership and registry
+  7 secrets    1Password/SSH readiness, no secret values
+  8 logs       detailed runtime logs
+  9 scratch    shell
+
+Navigation:
+  Ctrl-b w      picker
+  Ctrl-b 0-9    jump to numbered page shown in bottom bar
+  Ctrl-b arrows move panes
+  Ctrl-b z      zoom
+  Ctrl-b d      detach
+HELP
+      exit 0
+      ;;
+    *)
+      echo "mission-agent: unknown arg: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "mission-agent: required command missing: $1" >&2
+    exit 1
+  fi
+}
+
+pane_cmd() {
+  local role="$1" page="${2:-$1}"
+  printf 'MISSION_SESSION=%q MISSION_TITLE=%q MISSION_AGENT=%q MISSION_REPO_DIR=%q MISSION_WEB_PORT=%q MISSION_GATEWAY_PORT=%q MISSION_BROWSER_PORT=%q OPENCLAW_PROFILE_FLAG=%q OPENCLAW_LOG_FILE=%q HERMES_HOME=%q %q %q %q' \
+    "$SESSION" "$TITLE" "$AGENT" "$REPO_DIR" "${MISSION_WEB_PORT:-}" "${MISSION_GATEWAY_PORT:-}" "${MISSION_BROWSER_PORT:-}" "${OPENCLAW_PROFILE_FLAG:---dev}" "${OPENCLAW_LOG_FILE:-}" "${HERMES_HOME:-$HOME/.hermes}" "$PANE" "$role" "$page"
+}
+
+set_pane_title() {
+  tmux select-pane -t "$1" -T "$2" >/dev/null 2>&1 || true
+}
+
+setup_tmux_options() {
+  tmux set-option -t "$SESSION" status on >/dev/null
+  tmux set-option -t "$SESSION" status-position bottom >/dev/null
+  tmux set-option -t "$SESSION" status-left "#[bold] $TITLE #[fg=cyan]#I:#W #[default]" >/dev/null
+  tmux set-option -t "$SESSION" status-right '#[fg=green]C-b w picker #[fg=yellow]C-b z zoom #[fg=cyan]C-b d detach #[fg=white]#H %H:%M' >/dev/null
+  tmux set-option -t "$SESSION" pane-border-status top >/dev/null
+  tmux set-option -t "$SESSION" pane-border-format ' #{pane_title} ' >/dev/null
+  tmux set-option -t "$SESSION" allow-set-title off >/dev/null
+  tmux set-option -t "$SESSION" set-titles on >/dev/null
+  tmux set-option -t "$SESSION" default-size 180x48 >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" automatic-rename off >/dev/null
+  tmux set-window-option -t "$SESSION" aggressive-resize on >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" pane-base-index 0 >/dev/null 2>&1 || true
+  tmux set-option -t "$SESSION" base-index 0 >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" window-status-format ' #I:#W ' >/dev/null
+  tmux set-window-option -t "$SESSION" window-status-current-format '#[reverse] #I:#W #[default]' >/dev/null
+}
+
+refresh_env() {
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    [[ -n "${SSH_AUTH_SOCK:-}" ]] && tmux set-environment -t "$SESSION" SSH_AUTH_SOCK "$SSH_AUTH_SOCK" || true
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" OP_SERVICE_ACCOUNT_TOKEN "$OP_SERVICE_ACCOUNT_TOKEN" || true
+  fi
+}
+
+add_guide() {
+  local target="$1" page="$2" guide
+  guide="$(tmux split-window -v -l 12 -t "$target" -P -F '#{pane_id}' "$(pane_cmd guide "$page")")"
+  set_pane_title "$guide" "Shortcuts for $page"
+}
+
+new_page() {
+  local index="$1" name="$2" role="$3" title="$4" main
+  if [[ "$index" == "0" ]]; then
+    tmux new-session -d -s "$SESSION" -n "$name" "$(pane_cmd "$role" "$name")"
+    setup_tmux_options
+  else
+    tmux new-window -t "$SESSION:$index" -n "$name" "$(pane_cmd "$role" "$name")"
+  fi
+  main="$(tmux list-panes -t "$SESSION:$name" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "$title"
+  add_guide "$main" "$name"
+  tmux select-pane -t "$main" >/dev/null
+}
+
+build_session() {
+  new_page 0 chat chat "$AGENT chat/TUI - type here"
+  new_page 1 overview overview "Overview + URLs + process baseline"
+  new_page 2 gateway gateway "Gateway status + control hints"
+  new_page 3 cron cron "Cron scheduler + jobs"
+  new_page 4 sessions sessions "Sessions + process cleanup hints"
+  new_page 5 heartbeat heartbeat "Heartbeat/system events"
+  new_page 6 ports ports "Port registry + listeners"
+  new_page 7 secrets secrets "1Password/SSH readiness, no secret values"
+  new_page 8 logs logs "Detailed runtime logs"
+  new_page 9 scratch scratch "Scratch shell"
+  tmux select-window -t "$SESSION:0"
+}
+
+require tmux
+require zsh
+chmod +x "$PANE" >/dev/null 2>&1 || true
+require "$PANE"
+if [[ "$AGENT" == "openclaw" ]]; then
+  require openclaw
+else
+  require hermes
+fi
+
+if [[ "$RESET" -eq 1 ]] && tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux kill-session -t "$SESSION"
+fi
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  build_session
+else
+  setup_tmux_options
+fi
+refresh_env
+
+if [[ "$NO_ATTACH" -eq 1 ]]; then
+  echo "mission-agent: session ready: $SESSION"
+  tmux list-windows -t "$SESSION" -F '#{window_index}: #{window_name} panes=#{window_panes}'
+  echo "Attach: tmux attach -d -t $SESSION"
+  echo "Navigate: Ctrl-b w picker, Ctrl-b 0-9 direct pages, Ctrl-b z zoom, Ctrl-b d detach"
+else
+  exec tmux attach -d -t "$SESSION"
+fi

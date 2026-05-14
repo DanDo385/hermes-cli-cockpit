@@ -1,6 +1,16 @@
 # Navigation
 
-Hermes CLI Cockpit uses tmux. In tmux, the "pages" across the bottom are called windows.
+Hermes CLI Cockpit uses tmux. In tmux, the "pages" across the bottom are called windows. Panes are the cards inside a page.
+
+## First minute
+
+1. Run `mission-hermes` for Hermes or `mission-openclaw` for OpenClaw.
+2. Start on `0 chat` and talk to the selected assistant in the large pane.
+3. Read the live overview/status page if anything looks off.
+4. Use `Ctrl-b z` to zoom a noisy pane.
+5. Use `Ctrl-b d` to detach safely. The cockpit keeps running.
+
+Legacy note: `mission` still opens the original Hermes `mission-control` session.
 
 ## Core keyboard model
 
@@ -12,21 +22,38 @@ Ctrl-b
 
 Press `Ctrl-b`, release both keys, then press the next key.
 
+## Window/page map
+
+```text
+Ctrl-b 0      chat       selected assistant CLI/TUI conversation
+Ctrl-b 1      overview   health, URLs, process summary
+Ctrl-b 2      gateway    gateway status/control hints
+Ctrl-b 3      cron       scheduler/jobs
+Ctrl-b 4      sessions   stored sessions/processes
+Ctrl-b 5      heartbeat  heartbeat/system events
+Ctrl-b 6      ports      local listeners + port registry
+Ctrl-b 7      secrets    safe 1Password/SSH readiness, no raw values
+Ctrl-b 8      logs       detailed runtime logs
+Ctrl-b 9      scratch    blank command shell
+```
+
+The mirrored sessions are:
+
+```text
+mission-hermes     tmux session mission-hermes
+mission-openclaw   tmux session mission-openclaw
+```
+
+Every window includes a bottom shortcut pane. Use the numbers shown in the bottom tmux bar. If a live session predates a layout change, run `mission-hermes --reset` or `mission-openclaw --reset` to rebuild the cockpit pages.
+
 ## Window navigation
 
 ```text
 Ctrl-b w      window picker/list
 Ctrl-b n      next window
 Ctrl-b p      previous window
-Ctrl-b 0      jump to window 0
-Ctrl-b 1      jump to window 1
-Ctrl-b 2      jump to window 2
-Ctrl-b 3      jump to window 3
-Ctrl-b 4      jump to window 4
-Ctrl-b 5      jump to window 5
+Ctrl-b 0-9    jump directly to a page
 ```
-
-Use the numbers shown in the bottom tmux bar. Existing sessions may have `health` at a later number if it was added after launch.
 
 ## Pane navigation
 
@@ -48,11 +75,20 @@ Ctrl-b d      detach from tmux without killing the cockpit
 Detach means the cockpit keeps running on the MBP. You can reattach later with:
 
 ```bash
-mission
+mission-hermes
+mission-openclaw
 ```
 
-or:
+or directly:
 
 ```bash
-tmux attach -t mission-control
+tmux attach -d -t mission-hermes
+tmux attach -d -t mission-openclaw
+```
+
+Legacy Hermes cockpit:
+
+```bash
+mission
+tmux attach -d -t mission-control
 ```

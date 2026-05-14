@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hermes Mission Control</title>
+  <style>
+    body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background: #0b1020; color: #d8f3ff; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px; }
+    h1 { color: #64ffda; }
+    a { color: #7dd3fc; }
+    .card { border: 1px solid #243b53; border-radius: 12px; padding: 18px; margin: 16px 0; background: #111827; }
+    code, pre { background: #020617; color: #e5e7eb; border-radius: 8px; padding: 2px 6px; }
+    pre { padding: 14px; overflow-x: auto; }
+    .warn { color: #fbbf24; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Hermes Mission Control</h1>
+  <p>Terminal-native cockpit for the stable Hermes gateway on the MBP control plane.</p>
+
+  <section class="card">
+    <h2>Start / attach tmux</h2>
+    <pre>mission-hermes
+mission-hermes --reset
+mission-hermes --no-attach</pre>
+  </section>
+
+  <section class="card">
+    <h2>tmux navigation</h2>
+    <pre>Ctrl-b w      page picker
+Ctrl-b 0-9    jump to numbered page in bottom bar
+Ctrl-b arrows move panes
+Ctrl-b z      zoom current pane
+Ctrl-b d      detach</pre>
+  </section>
+
+  <section class="card">
+    <h2>Ports</h2>
+    <p>Hermes web page default: <code>4173</code></p>
+    <p>Hermes gateway default: <code>18789</code></p>
+    <p>Inspect on MBP:</p>
+    <pre>ports
+port-who 4173
+hermes gateway status</pre>
+  </section>
+
+  <section class="card">
+    <h2>iMac over Tailscale</h2>
+    <p>From the iMac, browse to:</p>
+    <pre>http://MBP_TAILSCALE_IP:4173/</pre>
+    <p class="warn">If the page is not reachable, the web helper may not be running or macOS firewall may be blocking inbound traffic.</p>
+  </section>
+</main>
+</body>
+</html>

@@ -23,6 +23,22 @@ port-who 3000
 - `port-who <port>` reports the process listening on one port.
 - No process killing is implemented in this slice.
 
+## MBP mission-control ports
+
+```text
+4173   hermes-mission-control web page
+4174   openclaw-mission-control web page
+19001  openclaw-mission-control dev gateway
+19003  openclaw-mission-control browser-control
+4000   litellm-proxy local proxy
+6463   Discord desktop local RPC
+```
+
+Notes:
+- `mission-web-hermes` serves the Hermes static page on 4173 if that port is free; it refuses to replace an existing listener.
+- `mission-web-openclaw` serves the OpenClaw static page on 4174.
+- OpenClaw gateway/browser-control ports are loopback by default. For iMac dashboard access, use SSH/Tailscale forwarding unless you deliberately configure authenticated tailnet exposure.
+
 ## Registry lookup order
 
 `ports` looks for a registry in this order:
