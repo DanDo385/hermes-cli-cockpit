@@ -8,6 +8,12 @@ mission-openclaw    OpenClaw dev/sandbox operations/control plane
 cmux                repo editing, review, test, browser, GitHub, Discord, Obsidian plane
 ```
 
+The deeper design note lives at:
+
+```text
+docs/cmux-flexible-workspace.md
+```
+
 ## Why separate cmux from mission-hermes?
 
 Mission cockpits answer: is the agent runtime healthy?
@@ -24,27 +30,77 @@ bin/cmux
 bin/cmux --reset
 ```
 
+Two-session companion mode:
+
+```bash
+bin/cmux --two-sessions --reset
+```
+
+Project-specific launch:
+
+```bash
+bin/cmux --project=/path/to/repo --reset
+bin/cctx /path/to/repo
+```
+
 Local install target:
 
 ```text
 ~/.local/bin/cmux -> ~/Code/hermes-cli-cockpit/bin/cmux
 ```
 
+## Workspace model
+
+Inspired by native cmux and the reference screenshot:
+
+```text
+left rail       project/session cards
+center          active surface: editor, agent, browser, PR, vault, API
+right/bottom    contextual scratch terminals near command lists
+ops bridge      Hermes/OpenClaw mission sessions remain reachable
+```
+
+The current implementation is tmux-backed, but the nouns intentionally match the future native cmux adapter target.
+
 ## Windows
 
 ```text
-0 ops       links to mission-hermes / mission-openclaw and live tmux topology
-1 editor    Neovim in the repo using CMUX_NVIM_APPNAME, default nvim
-2 diff      git status, diff, last commit, review commands
-3 browser   local browser/test URLs and smoke-test commands
-4 agents    Codex, Claude, OpenCode, agent-deck readiness and launch hints
-5 github    gh auth/repo/PR status and architecture discussion drafts
-6 obsidian  vault/project notes and quick open commands
-7 discord   Discord API readiness and discussion payload workflow
-8 scratch   shells for build/test/recovery
+0 hub       left rail + workspace overview + scratch terminal
+1 editor    Neovim center surface using CMUX_NVIM_APPNAME, default nvim
+2 project   cwd/project router, ports, docs, and directory-aware commands
+3 browser   browser/test URLs and smoke-test commands
+4 agents    Codex, Claude, OpenCode, Hermes, OpenClaw, agent-deck readiness
+5 hermes    Hermes/OpenClaw session bridge and spawn/resume commands
+6 github    gh auth/repo/PR status and architecture discussion drafts
+7 obsidian  vault/project notes and quick open commands
+8 discord   Discord API readiness and discussion payload workflow
+9 scratch   free terminals for build/test/recovery
 ```
 
-Every window has a bottom shortcut pane with the local navigation map.
+Most command-heavy pages include a right scratch terminal. The hub includes a left rail and a bottom scratch terminal. The scratch window provides a free terminal grid.
+
+## One-session vs two-session
+
+### One-session model
+
+```bash
+cmux --reset
+```
+
+Use this when one operator wants coding agent + Hermes bridge inside one workbench.
+
+### Two-session model
+
+```bash
+cmux --two-sessions --reset
+```
+
+Use this when the coding workbench and Hermes bridge should persist separately.
+
+```text
+cmux              coding workbench
+cmux-hermes       companion Hermes/OpenClaw bridge
+```
 
 ## Neovim and Kickstart
 
@@ -79,21 +135,65 @@ vim.api.nvim_create_autocmd({ 'BufEnter', 'CursorHold', 'CursorHoldI', 'FocusGai
 
 This lets Neovim notice files changed by Hermes/OpenClaw/Codex/Claude/OpenCode.
 
-## Diff and review loop
+## Project/CWD router
 
-Use the `diff` page before every commit:
+The `project` page is the manual cockpit view for the context router.
+
+Current behavior separates the active project from the cockpit helper repo:
 
 ```bash
+cd "$CMUX_REPO_DIR"                         # active project/repo
+pwd
 git status --short --branch
-git diff --check
-git diff
-git diff --cached
-git add <paths>
-git commit -m "feat(scope): short summary" -m "Longer why/comments."
-git push
+nvim .
+
+# cockpit helpers remain anchored to the cockpit repo, not arbitrary --project roots
+"${CMUX_COCKPIT_BIN_DIR:-/Users/openclaw/Code/hermes-cli-cockpit/bin}/ports" \
+  --registry "${CMUX_COCKPIT_ROOT:-/Users/openclaw/Code/hermes-cli-cockpit}/config/ports.toml"
 ```
 
-If diff tools are installed, the pane points to them. Missing tools should degrade to instructions, not break cmux.
+Current helper:
+
+```bash
+cctx
+cctx /Users/openclaw/Code/hermes-cli-cockpit
+cctx ~/.hermes/workspace/projects/hermes-cli-cockpit
+```
+
+Optional zsh hook for directory-aware context updates:
+
+```bash
+source /Users/openclaw/Code/hermes-cli-cockpit/bin/cctx-hook.zsh
+cctx-on       # every cd refreshes ~/.cache/hermes-cli-cockpit/cctx.env
+cctx-off      # disable the hook in this shell
+cctx-refresh  # manually refresh the current cwd
+```
+
+The hook is intentionally opt-in. The repo does not edit `~/.zshrc` automatically.
+
+Future target:
+
+```text
+You stay in the terminal.
+Changing directories changes the workspace context around you.
+```
+
+`cctx` is the first safe version of this: it resolves cwd, detects context kind, writes `~/.cache/hermes-cli-cockpit/cctx.env`, and prints exact `cmux` commands. `cmux` and its status panes now reread that state file, so changing context can repaint project cards, browser URLs, Obsidian targets, and recommended commands without killing live panes.
+
+Safety note: `cmux` parses only whitelisted keys from the `cctx.env` state file. It does not execute/source the file internally. Escape hatches:
+
+```bash
+CMUX_USE_CCTX_STATE=0 cmux --reset   # ignore saved cctx state on launch
+CMUX_DYNAMIC_CONTEXT=0               # keep existing panes from repainting from cctx.env
+```
+
+Scratch shells are deliberately not teleported when context changes. They remain command runways beside instructions so a running process, editor, or half-typed command is not destroyed.
+
+Guide panes can be removed once keyboard muscle memory improves:
+
+```bash
+CMUX_GUIDE_MODE=off cmux --reset
+```
 
 ## Browser testing
 
@@ -114,6 +214,13 @@ CMUX_BROWSER_URL=http://127.0.0.1:4175/hermes/ cmux --reset
 
 Rule: build/test passing is not the same as browser runtime verified.
 
+Native cmux future target:
+
+```bash
+cmux browser open-split "$CMUX_BROWSER_URL"
+cmux browser screenshot --out /tmp/cmux-frontend.png
+```
+
 ## Agent orchestration
 
 CMUX detects these tools when present:
@@ -122,8 +229,19 @@ CMUX detects these tools when present:
 codex
 claude
 opencode
+hermes
+openclaw
 agent-deck
 ```
+
+Agent-deck ideas adopted into the design:
+
+- visible board for many AI sessions
+- groups per project/session
+- worktree-backed parallel agents
+- fork/resume workflows
+- MCP/skills/cost/status dashboards
+- status detection: running, waiting, failed, done
 
 Safety model:
 
@@ -138,13 +256,15 @@ Safety model:
 The `github` page shows auth/repo/PR state via `gh` when authenticated and includes a starter discussion draft:
 
 ```text
-Title: CMUX workbench architecture: ops plane vs coding plane
+Title: CMUX flexible workspace foundation: project cards, agent surfaces, and Hermes/OpenClaw bridge
 
+- The left rail should model project/session cards.
+- Center surfaces should change by context: editor, agent, browser, PR, vault, API.
+- Scratch terminals belong beside command lists.
 - mission-hermes / mission-openclaw remain operational control surfaces.
 - cmux is the code/review/test/discussion workbench.
-- Neovim owns active editing; agents patch via git-visible diffs.
 - Browser, GitHub, Obsidian, and Discord panes make feedback loops visible.
-- Missing tools degrade to instructions rather than breaking the layout.
+- Agent orchestration uses worktrees, diff gates, and explicit handoffs.
 ```
 
 ## Obsidian vault

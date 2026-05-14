@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET="${1:-$PWD}"
+SESSION="${CMUX_SESSION:-cmux}"
+VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
+OPENCLAW_ROOT="${OPENCLAW_SOURCE:-$HOME/Code/openclaw}"
+STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hermes-cli-cockpit"
+APPLY_TMUX=1
+PRINT_ENV=0
+
+usage() {
+  cat <<'HELP'
+cctx: context router for the cmux workspace deck
+
+Usage:
+  cctx                         inspect current directory
+  cctx /path/to/project        inspect/switch context target
+  cctx --print-env /path       print shell exports only
+  cctx --no-tmux /path         do not update tmux environment
+
+What it does:
+  - resolves the target path
+  - detects git root / Obsidian vault / Hermes source / OpenClaw source
+  - writes a small env state file under ~/.cache/hermes-cli-cockpit/cctx.env
+  - updates the current tmux session environment when available
+  - prints exact cmux, mission, browser, and vault commands
+
+It does not rebuild sessions, kill panes, post messages, or touch gateways.
+HELP
+}
+
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --print-env) PRINT_ENV=1 ;;
+    --no-tmux) APPLY_TMUX=0 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+if [[ "${#args[@]}" -gt 0 ]]; then
+  TARGET="${args[0]}"
+fi
+
+resolve_path() {
+  python3 - "$1" <<'PY'
+import pathlib, sys
+print(pathlib.Path(sys.argv[1]).expanduser().resolve())
+PY
+}
+
+shell_quote() {
+  printf '%q' "$1"
+}
+
+if [[ ! -e "$TARGET" ]]; then
+  echo "cctx: target does not exist: $TARGET" >&2
+  exit 1
+fi
+
+TARGET_PATH="$(resolve_path "$TARGET")"
+TARGET_DIR="$TARGET_PATH"
+if [[ -f "$TARGET_PATH" ]]; then
+  TARGET_DIR="$(dirname "$TARGET_PATH")"
+fi
+
+GIT_ROOT="$(git -C "$TARGET_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+ROOT="$TARGET_DIR"
+KIND="directory"
+DISPLAY_NAME="$(basename "$TARGET_DIR")"
+BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}"
+OBSIDIAN_URI=""
+MISSION_HINT="tmux attach -d -t mission-hermes"
+
+case "$TARGET_PATH" in
+  "$VAULT"|"$VAULT"/*)
+    KIND="obsidian-vault"
+    ROOT="$VAULT"
+    DISPLAY_NAME="obsidian: ${TARGET_PATH#$VAULT/}"
+    OBSIDIAN_FILE="${TARGET_PATH#$VAULT/}"
+    OBSIDIAN_URI="obsidian://open?vault=hermes&file=$OBSIDIAN_FILE"
+    ;;
+  "$HOME/.hermes/hermes-agent"|"$HOME/.hermes/hermes-agent"/*)
+    KIND="hermes-agent-source"
+    ROOT="$HOME/.hermes/hermes-agent"
+    DISPLAY_NAME="Hermes Agent source"
+    MISSION_HINT="tmux attach -d -t mission-hermes"
+    ;;
+  "$OPENCLAW_ROOT"|"$OPENCLAW_ROOT"/*)
+    KIND="openclaw"
+    ROOT="${GIT_ROOT:-$OPENCLAW_ROOT}"
+    DISPLAY_NAME="OpenClaw context"
+    BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4174/}"
+    MISSION_HINT="tmux attach -d -t mission-openclaw"
+    ;;
+  *)
+    if [[ -n "$GIT_ROOT" ]]; then
+      ROOT="$GIT_ROOT"
+      DISPLAY_NAME="$(basename "$GIT_ROOT")"
+      KIND="git-project"
+      if [[ "$(basename "$GIT_ROOT")" == "hermes-cli-cockpit" ]]; then
+        KIND="hermes-cli-cockpit"
+        BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}"
+      elif [[ "$(basename "$GIT_ROOT" | tr '[:upper:]' '[:lower:]')" == "openclaw" ]]; then
+        KIND="openclaw"
+        DISPLAY_NAME="OpenClaw context"
+        BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4174/}"
+        MISSION_HINT="tmux attach -d -t mission-openclaw"
+      fi
+    fi
+    ;;
+esac
+
+BRANCH=""
+if [[ -n "$GIT_ROOT" ]]; then
+  BRANCH="$(git -C "$GIT_ROOT" branch --show-current 2>/dev/null || true)"
+fi
+
+mkdir -p "$STATE_DIR"
+STATE_FILE="$STATE_DIR/cctx.env"
+{
+  printf 'export CMUX_CONTEXT_PATH=%q\n' "$TARGET_PATH"
+  printf 'export CMUX_CONTEXT_KIND=%q\n' "$KIND"
+  printf 'export CMUX_CONTEXT_NAME=%q\n' "$DISPLAY_NAME"
+  printf 'export CMUX_REPO_DIR=%q\n' "$ROOT"
+  printf 'export CMUX_BROWSER_URL=%q\n' "$BROWSER_URL"
+  printf 'export CMUX_MISSION_HINT=%q\n' "$MISSION_HINT"
+  printf 'export OBSIDIAN_VAULT_PATH=%q\n' "$VAULT"
+} > "$STATE_FILE"
+
+if [[ "$APPLY_TMUX" -eq 1 ]] && [[ -n "${TMUX:-}" ]] && command -v tmux >/dev/null 2>&1; then
+  tmux set-environment -t "$SESSION" CMUX_CONTEXT_PATH "$TARGET_PATH" 2>/dev/null || true
+  tmux set-environment -t "$SESSION" CMUX_CONTEXT_KIND "$KIND" 2>/dev/null || true
+  tmux set-environment -t "$SESSION" CMUX_CONTEXT_NAME "$DISPLAY_NAME" 2>/dev/null || true
+  tmux set-environment -t "$SESSION" CMUX_REPO_DIR "$ROOT" 2>/dev/null || true
+  tmux set-environment -t "$SESSION" CMUX_BROWSER_URL "$BROWSER_URL" 2>/dev/null || true
+  tmux set-environment -t "$SESSION" CMUX_MISSION_HINT "$MISSION_HINT" 2>/dev/null || true
+  tmux display-message -t "$SESSION" "cctx: $KIND -> $DISPLAY_NAME" 2>/dev/null || true
+fi
+
+if [[ "$PRINT_ENV" -eq 1 ]]; then
+  cat "$STATE_FILE"
+  exit 0
+fi
+
+cat <<CARD
+CMUX CONTEXT CARD
+  kind:       $KIND
+  name:       $DISPLAY_NAME
+  target:     $TARGET_PATH
+  root:       $ROOT
+  branch:     ${BRANCH:-none}
+  browser:    $BROWSER_URL
+  state:      $STATE_FILE
+
+Open this context
+  CMUX_REPO_DIR=$(shell_quote "$ROOT") CMUX_CONTEXT_PATH=$(shell_quote "$TARGET_PATH") CMUX_CONTEXT_KIND=$(shell_quote "$KIND") CMUX_BROWSER_URL=$(shell_quote "$BROWSER_URL") cmux --project=$(shell_quote "$ROOT")
+
+Open without stealing focus
+  CMUX_REPO_DIR=$(shell_quote "$ROOT") CMUX_CONTEXT_PATH=$(shell_quote "$TARGET_PATH") CMUX_CONTEXT_KIND=$(shell_quote "$KIND") CMUX_BROWSER_URL=$(shell_quote "$BROWSER_URL") cmux --project=$(shell_quote "$ROOT") --no-attach
+
+Related cockpit
+  $MISSION_HINT
+CARD
+
+if [[ -n "$OBSIDIAN_URI" ]]; then
+  cat <<OBSIDIAN
+
+Obsidian
+  open $(shell_quote "$OBSIDIAN_URI")
+OBSIDIAN
+fi
+
+cat <<'TAIL'
+
+Mental model
+  You stay in the terminal.
+  cctx turns the current directory into a workspace card.
+  cmux then places editor, agent, browser, vault, Discord, GitHub, and scratch surfaces around that card.
+TAIL

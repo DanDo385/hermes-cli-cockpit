@@ -29,6 +29,7 @@ bin/mission --no-attach
 bin/mission-hermes --no-attach
 bin/mission-openclaw --no-attach
 bin/cmux --no-attach
+bin/cctx
 bin/hermes-health
 bin/ports
 bin/ports --registry config/ports.toml
@@ -42,6 +43,7 @@ mission                 # legacy/current Hermes cockpit: mission-control
 mission-hermes          # mirrored Hermes cockpit: mission-hermes
 mission-openclaw        # mirrored OpenClaw dev cockpit: mission-openclaw
 cmux                    # coding/review/test/discussion workbench: cmux
+cctx                    # cwd/project/session context card for cmux
 mission-web-hermes      # static Hermes mission page, default port 4173
 mission-web-openclaw    # static OpenClaw mission page, default port 4174
 hermes-health
@@ -49,7 +51,7 @@ ports
 port-who 3000
 ```
 
-- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cmux`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
+- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cmux`, `~/.local/bin/cctx`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
 - `config/ports.toml` is the local active port registry. `config/ports.example.toml` is a copyable template.
 - `ports` classifications: `REGISTERED` active known listener, `UNKNOWN` active unregistered listener, `EXPECTED_DOWN` registered port not listening, `CONFLICT` duplicate service claims.
 
@@ -91,7 +93,37 @@ mission-openclaw    OpenClaw dev/sandbox operations/control plane
 cmux                repo editing, review, browser testing, PRs, Obsidian, Discord discussions
 ```
 
-See `docs/cmux.md` for the window map, Neovim/Kickstart setup, agent orchestration rules, GitHub discussion draft, and dry-run-first Discord API helper.
+The current implementation is a tmux-backed flexible workspace deck inspired by native cmux:
+
+```text
+left rail       project/session cards
+center          active surface: editor, agent, browser, PR, vault, API
+right/bottom    contextual scratch terminals near command lists
+ops bridge      Hermes/OpenClaw mission sessions remain reachable
+```
+
+Run:
+
+```bash
+cmux --reset
+cmux --two-sessions --reset
+cmux --project=/path/to/repo --reset
+cctx /path/to/repo
+source /Users/openclaw/Code/hermes-cli-cockpit/bin/cctx-hook.zsh
+cctx-on
+```
+
+See `docs/cmux.md` for the operational map, `docs/cmux-flexible-workspace.md` for the deeper design/research notes covering the screenshot, native cmux, Kickstart Neovim, and agent-deck, and `docs/remote-ai-cockpit-plan.md` for the local cmux + remote tmux + Tailscale implementation plan.
+
+Important: official native cmux also installs a `cmux` CLI. This repo currently has a tmux-backed `bin/cmux` helper, so the long-term plan is to rename the repo helper before installing official cmux into PATH.
+
+`cctx` is the cwd-aware context router. It prints a workspace card for the current directory, writes `~/.cache/hermes-cli-cockpit/cctx.env`, and shows the exact `cmux --project=...` command for that context without rebuilding sessions or touching gateways. `cmux` rereads that state so status panes can repaint around the active context. The zsh hook is opt-in and can be disabled with `cctx-off`.
+
+When the training wheels get annoying, launch without guide panes:
+
+```bash
+CMUX_GUIDE_MODE=off cmux --reset
+```
 
 OpenClaw defaults to `--dev` and loopback gateway operation. For iMac access to the OpenClaw dashboard, prefer SSH/Tailscale port forwarding over broad unauthenticated exposure.
 

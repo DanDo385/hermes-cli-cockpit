@@ -1,23 +1,92 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROLE="${1:-ops}"
+ROLE="${1:-hub}"
 PAGE="${2:-${ROLE}}"
 SESSION="${CMUX_SESSION:-cmux}"
 TITLE="${CMUX_TITLE:-CMUX Agent Workbench}"
 REPO_DIR="${CMUX_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+COCKPIT_ROOT="${CMUX_COCKPIT_ROOT:-/Users/openclaw/Code/hermes-cli-cockpit}"
+COCKPIT_BIN_DIR="${CMUX_COCKPIT_BIN_DIR:-$COCKPIT_ROOT/bin}"
 VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
 NVIM_APPNAME_VALUE="${CMUX_NVIM_APPNAME:-nvim}"
 BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}"
 GITHUB_REPO="${CMUX_GITHUB_REPO:-DanDo385/hermes-cli-cockpit}"
+TOPOLOGY="${CMUX_TOPOLOGY:-integrated}"
+CONTEXT_PATH="${CMUX_CONTEXT_PATH:-$REPO_DIR}"
+CONTEXT_KIND="${CMUX_CONTEXT_KIND:-project}"
+CONTEXT_NAME="${CMUX_CONTEXT_NAME:-$(basename "$CONTEXT_PATH")}"
+STATE_FILE="${CMUX_CONTEXT_STATE_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/hermes-cli-cockpit/cctx.env}"
+GUIDE_MODE="${CMUX_GUIDE_MODE:-full}"
+
+load_cctx_state() {
+  [[ -r "$STATE_FILE" ]] || return 0
+
+  local key value
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      CMUX_CONTEXT_PATH|CMUX_CONTEXT_KIND|CMUX_CONTEXT_NAME|CMUX_REPO_DIR|CMUX_BROWSER_URL|CMUX_MISSION_HINT|OBSIDIAN_VAULT_PATH)
+        printf -v "$key" '%s' "$value"
+        ;;
+    esac
+  done < <(python3 - "$STATE_FILE" <<'PY'
+import shlex
+import sys
+
+allowed = {
+    "CMUX_CONTEXT_PATH",
+    "CMUX_CONTEXT_KIND",
+    "CMUX_CONTEXT_NAME",
+    "CMUX_REPO_DIR",
+    "CMUX_BROWSER_URL",
+    "CMUX_MISSION_HINT",
+    "OBSIDIAN_VAULT_PATH",
+}
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            try:
+                parts = shlex.split(raw, posix=True)
+            except ValueError:
+                continue
+            if len(parts) != 2 or parts[0] != "export" or "=" not in parts[1]:
+                continue
+            key, value = parts[1].split("=", 1)
+            if key in allowed:
+                print(f"{key}\t{value}")
+except OSError:
+    pass
+PY
+  )
+}
+
+refresh_context_state() {
+  [[ "${CMUX_DYNAMIC_CONTEXT:-1}" == "1" ]] || return 0
+  [[ -r "$STATE_FILE" ]] || return 0
+  load_cctx_state
+  REPO_DIR="${CMUX_REPO_DIR:-$REPO_DIR}"
+  VAULT="${OBSIDIAN_VAULT_PATH:-$VAULT}"
+  BROWSER_URL="${CMUX_BROWSER_URL:-$BROWSER_URL}"
+  CONTEXT_PATH="${CMUX_CONTEXT_PATH:-$CONTEXT_PATH}"
+  CONTEXT_KIND="${CMUX_CONTEXT_KIND:-$CONTEXT_KIND}"
+  CONTEXT_NAME="${CMUX_CONTEXT_NAME:-$(basename "$CONTEXT_PATH")}"
+}
 
 hr() { printf '%*s\n' "${COLUMNS:-100}" '' | tr ' ' '-'; }
 now() { date '+%Y-%m-%d %H:%M:%S %Z'; }
 
 header() {
+  refresh_context_state
   clear || true
   printf '%s :: %s\n' "$TITLE" "$1"
-  printf 'Session: %s   Repo: %s   Time: %s\n' "$SESSION" "$REPO_DIR" "$(now)"
+  printf 'Session: %s   Repo: %s   Topology: %s   Time: %s\n' "$SESSION" "$REPO_DIR" "$TOPOLOGY" "$(now)"
+  printf 'Cockpit: %s\n' "$COCKPIT_ROOT"
+  printf 'Context: %s   Kind: %s   Name: %s\n' "$CONTEXT_PATH" "$CONTEXT_KIND" "$CONTEXT_NAME"
   hr
   printf '\n'
 }
@@ -43,39 +112,62 @@ present() {
   fi
 }
 
+short_git_branch() {
+  cd "$REPO_DIR" 2>/dev/null && git branch --show-current 2>/dev/null || true
+}
+
 show_guide() {
   cat <<GUIDE
 PAGE SHORTCUTS
   Ctrl-b w       page picker
   Ctrl-b n / p   next / previous page
-  Ctrl-b 0-8     jump by bottom-bar number
+  Ctrl-b 0-9     jump by bottom-bar number
   Ctrl-b arrows  move between panes
   Ctrl-b z       zoom current pane
   Ctrl-b d       detach safely
 
+KEYBOARD DRILL
+  1. Ctrl-b w, pick this page, Enter.
+  2. Ctrl-b arrows into the scratch pane.
+  3. Run one listed command, then Ctrl-b z to zoom/unzoom.
+  4. Ctrl-b d detaches without killing the workspace.
+
+CLI MODES
+  cmux --no-attach                 build/check without stealing focus
+  cmux --reset                     rebuild this workspace
+  cmux --project=/path/to/repo     steer the deck at another repo
+  cctx /path/to/repo               update the context card
+  tmux attach -d -t $SESSION       return from plain CLI
+
+SCRATCH RULE
+  Every page has a zsh scratch pane. Use it for commands, tests, log tails, and recovery.
+  Keep the main pane readable; do the messy work in scratch.
+
 WINDOWS
-  0 ops       links to mission-hermes / mission-openclaw
-  1 editor    Neovim with Kickstart-style config
-  2 diff      git status, diff, review loop
-  3 browser   browser/test URLs and smoke commands
-  4 agents    Codex, Claude, OpenCode, agent-deck readiness
-  5 github    PR status and architecture discussion workflow
-  6 obsidian  vault/project notes
-  7 discord   Discord API readiness and discussion drafts
-  8 scratch   build/test/recovery shells
+  0 hub       workspace rail + overview + scratch
+  1 editor    Neovim center surface
+  2 project   cwd/project router and local docs
+  3 browser   frontend/browser test surface
+  4 agents    coding agents + agent-deck orchestration
+  5 hermes    Hermes/OpenClaw sessions and bridges
+  6 github    PR status and architecture discussion workflow
+  7 obsidian  vault/project notes
+  8 discord   Discord API readiness and discussion drafts
+  9 scratch   free build/test/recovery shells
 
 THIS PAGE
 GUIDE
   case "$PAGE" in
-    ops) printf '  Use this as the bridge to live Hermes/OpenClaw mission-control sessions.\n' ;;
-    editor) printf '  Main pane runs nvim. Guide pane documents Kickstart and external-edit safety.\n' ;;
-    diff) printf '  Inspect local changes before any add/commit/push.\n' ;;
-    browser) printf '  Open local URLs and run curl/browser smoke checks.\n' ;;
-    agents) printf '  Launch CLI coding tools deliberately. Prefer worktrees for parallel agents.\n' ;;
+    hub) printf '  Left rail is the outside-in project/session chooser. Center is the active surface.\n' ;;
+    editor) printf '  Neovim owns editing. Scratch pane is for nearby commands and tests.\n' ;;
+    project) printf '  Directory-aware router: cwd, git, ports, docs, and local commands.\n' ;;
+    browser) printf '  Run dev server in scratch, open/check URL from the main pane.\n' ;;
+    agents) printf '  Launch coding CLIs deliberately. Agent-deck becomes the orchestration board when installed.\n' ;;
+    hermes) printf '  Bridge into Hermes/OpenClaw mission sessions or spawn/resume Hermes CLI sessions.\n' ;;
     github) printf '  Watch PR state and draft architecture discussion without surprise posting.\n' ;;
-    obsidian) printf '  Jump into the vault and project docs. Keep private notes out of public commits.\n' ;;
+    obsidian) printf '  Jump into vault notes. Keep private details out of public commits.\n' ;;
     discord) printf '  Check API readiness. Posting requires explicit command/content/channel.\n' ;;
-    scratch) printf '  Free shells. Use tests before committing.\n' ;;
+    scratch) printf '  Free shells. Use this for experiments and cleanup.\n' ;;
     *) printf '  General cmux workbench pane.\n' ;;
   esac
 }
@@ -87,25 +179,184 @@ NEOVIM / KICKSTART GUIDE
   Config path:     $HOME/.config/$NVIM_APPNAME_VALUE/init.lua
   Repo root:       $REPO_DIR
 
+Neovim keyboard survival kit:
+  i             insert mode
+  Esc           normal mode
+  :w            save
+  :q            quit current window
+  :wq           save and quit
+  :q!           quit without saving
+  /text Enter   search forward
+  n / N         next / previous search result
+  :e file       open file
+  :Ex           file explorer
+  Ctrl-w h/j/k/l move between Neovim splits
+  :checktime    reload files changed by agents
+
+tmux around Neovim:
+  Ctrl-b arrows move to scratch/guide panes
+  Ctrl-b z      zoom Neovim full-screen, then unzoom
+  Ctrl-b d      detach without quitting Neovim
+
+Practice loop:
+  1. Open README.md with :e README.md
+  2. Search /cmux
+  3. Save with :w
+  4. Move to scratch with Ctrl-b arrow and run git diff --stat
+
 Kickstart mental model:
-  init.lua is the starter cockpit for plugins, keymaps, LSP, Telescope, Git UI, and file navigation.
-  This machine currently has a Lazy.nvim/Telescope/Yazi-style config under ~/.config/nvim.
+  Kickstart is not a full distribution. It is a readable launch point for your own config.
+  Lazy.nvim manages plugins; init.lua is meant to be read and modified.
+  Nerd Font support matters for icons and statusline glyphs.
 
-Hermes/OpenClaw external edit safety:
-  Neovim should use autoread/checktime so files patched by agents refresh cleanly.
-  Verify inside nvim:
-    :set autoread?
-    :checktime
+Center-surface contract:
+  Neovim owns active editing.
+  Hermes/OpenClaw/Codex/Claude/OpenCode patch files externally.
+  Git diff is the truth layer between humans and agents.
 
-Useful default-ish keys in this config:
-  Space is leader
-  Space+f style mappings are usually file/search actions if configured
-  Ctrl-b remains tmux prefix outside Neovim
+Agent-edit safety:
+  :set autoread?
+  :checktime
 
-If you want a clean Kickstart sandbox later:
+Useful later upgrades:
+  Telescope/fzf-lua for file and symbol search.
+  LSP + diagnostics for code intelligence.
+  Trouble/quickfix for test failures.
+  Neogit/lazygit for review ergonomics.
+
+Clean Kickstart sandbox:
   git clone https://github.com/nvim-lua/kickstart.nvim ~/.config/nvim-kickstart
   CMUX_NVIM_APPNAME=nvim-kickstart cmux --reset
 EDITOR
+}
+
+show_rail() {
+  header 'Workspace rail'
+  local branch
+  branch="$(short_git_branch)"
+  cat <<RAIL
+PROJECT CARD
+  name:  $CONTEXT_NAME
+  cwd:   $REPO_DIR
+  ctx:   $CONTEXT_KIND -> $CONTEXT_PATH
+  git:   ${branch:-unknown}
+  url:   $BROWSER_URL
+
+SESSION CARDS
+  0  hub       overview / outside-in chooser
+  1  editor    Neovim center surface
+  2  project   directory router
+  3  browser   frontend test loop
+  4  agents    Codex / Claude / OpenCode / agent-deck
+  5  hermes    Hermes + OpenClaw bridge
+  6  github    repo + PRs + discussion
+  7  obsidian  vault notes
+  8  discord   API/dry-run posting
+  9  scratch   loose terminals
+
+WORKSPACE TOPOLOGIES
+  One session:
+    cmux --reset
+    coding agent + Hermes bridge live inside one tmux session.
+
+  Two sessions:
+    cmux --two-sessions --reset
+    cmux is the coding workbench; cmux-hermes is a companion bridge.
+
+DIRECTORY IDEA
+  The long-term target is a cwd-aware workspace:
+    outside = project or Hermes conversation
+    center  = active terminal/editor/agent surface
+    context = changes as cwd moves through Hermes/OpenClaw/project tree
+
+  Today: use window 2 project as the router and every command page has nearby scratch.
+  Now: run `cctx` from any directory to print/update the context card.
+  Optional: source the cockpit hook, then run `cctx-on` so cd updates the card.
+  Escape hatches: CMUX_USE_CCTX_STATE=0 on launch, or CMUX_DYNAMIC_CONTEXT=0 in panes.
+RAIL
+  printf '\nCtrl-b 0-9 switches cards. Ctrl-b z zooms this rail.\n'
+  exec zsh -l
+}
+
+show_hub() {
+  printf 'Screenshot-derived design readout\n'
+  cat <<'HUB'
+  The photo is not just panes. It is a workspace deck:
+    - left rail card = selected project/session identity
+    - top tabs = surfaces inside that selected context
+    - center = live agent terminal surface
+    - command input = direct agent loop, not passive dashboard
+    - empty space = intentional room for agent output and long-running work
+
+  Translation for this repo:
+    - tmux windows emulate the left rail cards
+    - pane titles emulate surface tabs
+    - Neovim is the editor surface, not the whole cockpit
+    - Hermes/OpenClaw sessions are first-class surfaces, not external chores
+    - scratch terminals sit beside command lists so Dan can act immediately
+
+Flexible foundation principles
+  1. Outside-in selection: start from project, Hermes conversation, or OpenClaw area.
+  2. Center surface changes by context: editor, agent, browser, API, vault, PR.
+  3. Scratch is always close to instructions.
+  4. Browser testing is a first-class feedback loop, not an afterthought.
+  5. Discord/Obsidian/GitHub are collaboration surfaces, with dry-run gates.
+  6. Agents run in visible slots with git/worktree boundaries.
+
+Current implementation
+  - 10 windows, each with contextual scratch where commands are listed.
+  - Hub uses left rail + center overview + scratch.
+  - Agents page tracks Codex, Claude, OpenCode, Hermes CLI, OpenClaw, agent-deck.
+  - Hermes page bridges mission-hermes and mission-openclaw.
+  - Browser page supports frontend/manual smoke tests.
+
+Future native cmux migration
+  Native cmux has vertical tabs, Ghostty terminal surfaces, notifications, browser panes, and session metadata.
+  This tmux version now uses the same nouns so migration can become adapter work, not a rewrite.
+HUB
+}
+
+show_project() {
+  cd "$REPO_DIR"
+  printf 'Project/router\n'
+  printf '  cwd:        %s\n' "$PWD"
+  printf '  git branch: %s\n' "$(git branch --show-current 2>/dev/null || printf unknown)"
+  printf '  root:       '
+  git rev-parse --show-toplevel 2>/dev/null || true
+  printf '\nStatus\n'
+  git status --short --branch 2>/dev/null || true
+  printf '\nRelevant local surfaces\n'
+  for rel in README.md docs/cmux.md docs/architecture.md docs/navigation.md config/ports.toml web/hermes/index.html web/openclaw/index.html; do
+    [[ -e "$rel" ]] && printf '  ✅ %s\n' "$rel" || printf '  ⚪ %s\n' "$rel"
+  done
+  cat <<PROJECT
+
+Directory-aware commands
+  "$COCKPIT_BIN_DIR/cctx"
+  "$COCKPIT_BIN_DIR/cctx" "$REPO_DIR"
+  source "$COCKPIT_BIN_DIR/cctx-hook.zsh"
+  cctx-on
+  cctx-off
+  cctx-refresh
+  cd "$REPO_DIR"
+  nvim .
+  "$COCKPIT_BIN_DIR/ports" --registry "$COCKPIT_ROOT/config/ports.toml"
+  "$COCKPIT_BIN_DIR/mission-web-hermes" --no-open
+  "$COCKPIT_BIN_DIR/mission-web-openclaw" --no-open
+
+Context router concept
+  `cctx` notices cwd and refreshes:
+    - project card
+    - recommended commands
+    - browser URL
+    - Obsidian note
+    - agent/worktree slots
+
+Live-pane behavior
+  cmux status pages reread the cctx state file on each refresh.
+  Scratch shells do not magically move; they are command runways.
+  This keeps automation useful without stealing your prompt or killing panes.
+PROJECT
 }
 
 show_ops() {
@@ -186,9 +437,19 @@ Open/smoke commands
   python3 -m http.server 4175 --directory "$REPO_DIR/web"
   CMUX_BROWSER_URL=http://127.0.0.1:4175/hermes/ cmux --reset
 
+Frontend testing loop
+  1. Start dev/static server in the scratch pane.
+  2. Open the URL in a browser.
+  3. Run smoke checks.
+  4. Capture failures in Obsidian or GitHub issue/PR notes.
+
+Native cmux target
+  When using the actual macOS cmux app, this becomes a browser surface/pane:
+    cmux browser open-split "$BROWSER_URL"
+    cmux browser screenshot --out /tmp/cmux-frontend.png
+
 Testing rule
   Build/test passing is not the same as browser runtime verified.
-  For UI changes, load the affected URL and check for runtime/console errors.
 BROWSER
 }
 
@@ -197,16 +458,38 @@ show_agents() {
   present codex
   present claude
   present opencode
+  present hermes
+  present openclaw
   present agent-deck
   present git
   present tmux
   cat <<'AGENTS'
 
+Agent-deck research takeaways
+  agent-deck is a TUI command center for many AI coding sessions.
+  Its useful ideas for cmux:
+    - one visible board for all agents
+    - groups per project/session
+    - fork/resume sessions
+    - worktree-backed parallel agents
+    - status detection: running, waiting, failed, done
+    - MCP/skills/cost dashboards as operational panels
+
 Recommended use
   codex      focused code edits, tests, repo tasks
   claude     large refactors/reviews when available
   opencode   alternative coding agent / review loop
+  hermes     tool-rich system/workflow agent and gateway-aware assistant
+  openclaw   sandboxed dev agent/runtime experiments
   agent-deck orchestration dashboard if installed later
+
+Launch patterns
+  codex
+  claude
+  opencode
+  hermes --worktree
+  agent-deck
+  agent-deck add . -c claude --worktree feature/a --new-branch
 
 Safety model
   1. Inspect diff before delegating.
@@ -214,12 +497,50 @@ Safety model
   3. Never let two agents patch the same files blindly.
   4. Run tests before commit.
   5. Do not paste secrets into agent prompts or visible tmux panes.
-
-Useful worktree commands
-  git worktree list
-  git worktree add ../hermes-cli-cockpit-agent-a -b agent/a
-  git worktree remove ../hermes-cli-cockpit-agent-a
 AGENTS
+}
+
+show_hermes() {
+  printf 'Hermes/OpenClaw bridge\n'
+  printf '  This page is the explicit answer to: coding agent + Hermes, or coding agent and Hermes as two sessions.\n\n'
+  printf 'Live related tmux sessions\n'
+  tmux list-sessions -F '  #{session_name}: windows=#{session_windows} attached=#{session_attached} created=#{session_created_string}' 2>/dev/null | sed -n '/hermes/p;/openclaw/p;/cmux/p' || true
+  printf '\nHermes CLI readiness\n'
+  present hermes
+  present openclaw
+  present tmux
+  present sqlite3
+  cat <<'HERMES'
+
+One-session model
+  cmux --reset
+  Use window 4 for coding agents and this window for Hermes/OpenClaw bridge commands.
+  Good when one human is steering and wants everything in one tmux session.
+
+Two-session model
+  cmux --two-sessions --reset
+  Use one session for coding and one companion bridge for Hermes/OpenClaw.
+  Good when Hermes needs to persist separately from a coding-agent experiment.
+
+Attach existing mission sessions
+  tmux attach -d -t mission-hermes
+  tmux attach -d -t mission-openclaw
+
+Spawn/resume Hermes sessions
+  hermes
+  hermes --continue
+  hermes sessions list
+  hermes sessions browse
+  hermes --worktree
+
+Hermes one-shot examples
+  hermes chat -q "Review this repo architecture and suggest next implementation steps" --toolsets terminal,file
+  hermes chat -q "Summarize current gateway/cron health" --toolsets terminal,file
+
+OpenClaw boundary
+  Use OpenClaw as sandbox/dev by default.
+  Do not make OpenClaw a production launchd gateway unless explicitly chosen.
+HERMES
 }
 
 show_github() {
@@ -239,19 +560,20 @@ show_github() {
   cat <<'GITHUB'
 
 Architecture discussion draft
-  Title: CMUX workbench architecture: ops plane vs coding plane
+  Title: CMUX flexible workspace foundation: project cards, agent surfaces, and Hermes/OpenClaw bridge
   Body bullets:
+    - The left rail should model project/session cards.
+    - Center surfaces should change by context: editor, agent, browser, PR, vault, API.
+    - Scratch terminals belong beside command lists.
     - mission-hermes / mission-openclaw remain operational control surfaces.
     - cmux is the code/review/test/discussion workbench.
-    - Neovim owns active editing; agents patch via git-visible diffs.
     - Browser, GitHub, Obsidian, and Discord panes make feedback loops visible.
-    - Missing tools degrade to instructions rather than breaking the layout.
+    - Agent orchestration uses worktrees, diff gates, and explicit handoffs.
 
 Commands when gh auth is healthy
   gh repo view
   gh pr status
-  gh issue create --title "CMUX workbench architecture" --body-file docs/cmux.md
-  gh pr create --title "feat: add cmux agent workbench" --body "..."
+  gh issue create --title "CMUX flexible workspace foundation" --body-file docs/cmux.md
 GITHUB
 }
 
@@ -279,6 +601,12 @@ Open commands
   nvim "$VAULT/agent-hermes/notes/next-steps.md"
   open "obsidian://open?vault=hermes&file=projects/hermes-cli-cockpit"
 
+Capture ideas
+  - workspace design decisions
+  - frontend/browser smoke failures
+  - Discord discussion summaries
+  - Hermes/OpenClaw session follow-ups
+
 Boundary rule
   Public repo docs must be sanitized.
   Private hostnames, account details, Tailscale specifics, tokens, raw logs, and private Discord content stay in the vault.
@@ -299,6 +627,7 @@ show_discord() {
   fi
   present curl
   present jq
+  present python3
   cat <<'DISCORD'
 
 Discussion workflow
@@ -307,18 +636,124 @@ Discussion workflow
   3. Post only after confirming the destination and text.
   4. Verify by fetching the created message ID.
 
-Safe API shape, do not paste tokens into the terminal history:
+Safe API shape, do not paste tokens into terminal history:
   python3 scripts/post-discord-discussion.py --channel-id "$DISCORD_CHANNEL_ID" --file docs/cmux.md --dry-run
 
 Discussion starter ideas
   - "Should cmux stay repo-specific or become a general cockpit generator?"
   - "What belongs in mission-hermes vs cmux? Ops plane vs coding plane."
   - "Agent orchestration safety: worktrees, diff gates, and PR handoff rules."
+  - "How should native cmux browser panes map to our tmux fallback?"
 DISCORD
 }
 
+page_commands() {
+  case "$PAGE" in
+    hub)
+      cat <<CMDS
+cd "$REPO_DIR"
+git status --short --branch
+cmux --no-attach
+cmux --two-sessions --no-attach
+CMDS
+      ;;
+    editor)
+      cat <<CMDS
+cd "$REPO_DIR"
+nvim README.md docs/cmux.md docs/architecture.md
+nvim +':checktime'
+git diff --stat
+CMDS
+      ;;
+    project)
+      cat <<CMDS
+cd "$REPO_DIR"
+pwd
+git status --short --branch
+"$COCKPIT_BIN_DIR/cctx"
+source "$COCKPIT_BIN_DIR/cctx-hook.zsh"
+cctx-on
+"$COCKPIT_BIN_DIR/ports" --registry "$COCKPIT_ROOT/config/ports.toml"
+CMDS
+      ;;
+    browser)
+      cat <<CMDS
+cd "$REPO_DIR"
+python3 -m http.server 4175 --directory web
+open "$BROWSER_URL"
+curl -I "$BROWSER_URL"
+CMDS
+      ;;
+    agents)
+      cat <<CMDS
+cd "$REPO_DIR"
+codex
+claude
+opencode
+hermes --worktree
+agent-deck
+CMDS
+      ;;
+    hermes)
+      cat <<CMDS
+tmux attach -d -t mission-hermes
+tmux attach -d -t mission-openclaw
+hermes
+hermes --continue
+hermes sessions list
+CMDS
+      ;;
+    github)
+      cat <<CMDS
+cd "$REPO_DIR"
+gh repo view
+gh pr status
+git diff --check
+git push
+CMDS
+      ;;
+    obsidian)
+      cat <<CMDS
+nvim "$VAULT/projects/hermes-cli-cockpit"
+open "obsidian://open?vault=hermes&file=projects/hermes-cli-cockpit"
+cd "$VAULT" && pwd
+CMDS
+      ;;
+    discord)
+      cat <<CMDS
+cd "$REPO_DIR"
+python3 scripts/post-discord-discussion.py --channel-id "\$DISCORD_CHANNEL_ID" --file docs/cmux.md --dry-run
+CMDS
+      ;;
+    *)
+      cat <<CMDS
+cd "$REPO_DIR"
+pwd
+git status --short --branch
+CMDS
+      ;;
+  esac
+}
+
+show_command_scratch() {
+  clear || true
+  printf 'Scratch terminal for page: %s\n' "$PAGE"
+  printf 'Repo: %s\n' "$REPO_DIR"
+  printf 'Tip: copy commands from below, edit before running. This shell is intentionally disposable.\n'
+  hr
+  page_commands | sed 's/^/  /'
+  hr
+  cd "$REPO_DIR" 2>/dev/null || cd "$HOME"
+  exec zsh -l
+}
+
 show_scratch() {
-  cd "$REPO_DIR"
+  clear || true
+  printf 'Free scratch shell\n'
+  printf 'Repo: %s\n' "$REPO_DIR"
+  printf 'Use this for experiments, tests, log tails, and recovery commands.\n'
+  hr
+  cd "$REPO_DIR" 2>/dev/null || cd "$HOME"
   exec zsh -l
 }
 
@@ -331,13 +766,18 @@ case "$ROLE" in
     show_editor_guide
     exec zsh -l
     ;;
+  rail) show_rail ;;
+  hub) loop 'Workspace hub' 20 show_hub ;;
+  project) loop 'Project/CWD router' 15 show_project ;;
   ops) loop 'Ops link' 10 show_ops ;;
   diff) loop 'Git diff/review' 8 show_diff ;;
   browser) loop 'Browser/test surface' 15 show_browser ;;
   agents) loop 'Agent orchestration' 15 show_agents ;;
+  hermes) loop 'Hermes/OpenClaw bridge' 15 show_hermes ;;
   github) loop 'GitHub PR/discussion' 20 show_github ;;
   obsidian) loop 'Obsidian vault' 20 show_obsidian ;;
   discord) loop 'Discord discussion workflow' 20 show_discord ;;
+  command-scratch) show_command_scratch ;;
   scratch) show_scratch ;;
   *)
     header "Unknown role"
