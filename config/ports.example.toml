@@ -14,3 +14,7 @@ local_proxy = 4000
 [discord-desktop]
 host = "control-host"
 local_rpc = 6463
+
+[cmux-workbench]
+host = "control-host"
+browser_test_web = 4175

@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${CMUX_SESSION:-cmux}"
+TITLE="${CMUX_TITLE:-CMUX Agent Workbench}"
+REPO_DIR="${CMUX_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+PANE="$REPO_DIR/bin/cmux-pane"
+NVIM_APPNAME_VALUE="${CMUX_NVIM_APPNAME:-nvim}"
+VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
+NO_ATTACH=0
+RESET=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-attach) NO_ATTACH=1 ;;
+    --reset|--rebuild) RESET=1 ;;
+    -h|--help)
+      cat <<'HELP'
+cmux: terminal agent workbench for coding, review, browser testing, GitHub, Obsidian, and Discord ops
+
+Usage:
+  cmux              create/attach cmux session
+  cmux --no-attach  create/verify without attaching
+  cmux --reset      rebuild the cmux layout, then attach
+
+Windows:
+  0 ops       links to mission-hermes / mission-openclaw and live tmux topology
+  1 editor    Neovim in the repo using CMUX_NVIM_APPNAME, default nvim
+  2 diff      git status, diff, last commit, review commands
+  3 browser   local browser/test URLs and smoke-test commands
+  4 agents    Codex, Claude, OpenCode, agent-deck readiness and launch hints
+  5 github    gh auth/repo/PR status and architecture discussion drafts
+  6 obsidian  vault/project notes and quick open commands
+  7 discord   Discord API readiness and discussion payload workflow
+  8 scratch   shells for build/test/recovery
+
+Navigation:
+  Ctrl-b w      picker
+  Ctrl-b 0-8    jump by bottom-bar page number
+  Ctrl-b arrows move panes
+  Ctrl-b z      zoom
+  Ctrl-b d      detach safely
+
+Environment knobs:
+  CMUX_SESSION=cmux
+  CMUX_REPO_DIR=/path/to/repo
+  CMUX_NVIM_APPNAME=nvim
+  CMUX_BROWSER_URL=http://127.0.0.1:4173/
+  CMUX_GITHUB_REPO=DanDo385/hermes-cli-cockpit
+HELP
+      exit 0
+      ;;
+    *)
+      echo "cmux: unknown arg: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "cmux: required command missing: $1" >&2
+    exit 1
+  fi
+}
+
+pane_cmd() {
+  local role="$1" page="${2:-$1}"
+  printf 'CMUX_SESSION=%q CMUX_TITLE=%q CMUX_REPO_DIR=%q CMUX_NVIM_APPNAME=%q OBSIDIAN_VAULT_PATH=%q CMUX_BROWSER_URL=%q CMUX_GITHUB_REPO=%q %q %q %q' \
+    "$SESSION" "$TITLE" "$REPO_DIR" "$NVIM_APPNAME_VALUE" "$VAULT" "${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}" "${CMUX_GITHUB_REPO:-DanDo385/hermes-cli-cockpit}" "$PANE" "$role" "$page"
+}
+
+set_pane_title() {
+  tmux select-pane -t "$1" -T "$2" >/dev/null 2>&1 || true
+}
+
+setup_tmux_options() {
+  tmux set-option -t "$SESSION" status on >/dev/null
+  tmux set-option -t "$SESSION" status-position bottom >/dev/null
+  tmux set-option -t "$SESSION" status-left "#[bold] $TITLE #[fg=cyan]#I:#W #[default]" >/dev/null
+  tmux set-option -t "$SESSION" status-right '#[fg=green]C-b w picker #[fg=yellow]C-b z zoom #[fg=cyan]C-b d detach #[fg=white]#H %H:%M' >/dev/null
+  tmux set-option -t "$SESSION" pane-border-status top >/dev/null
+  tmux set-option -t "$SESSION" pane-border-format ' #{pane_title} ' >/dev/null
+  tmux set-option -t "$SESSION" allow-set-title off >/dev/null
+  tmux set-option -t "$SESSION" set-titles on >/dev/null
+  tmux set-option -t "$SESSION" default-size 190x50 >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" automatic-rename off >/dev/null
+  tmux set-window-option -t "$SESSION" aggressive-resize on >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" pane-base-index 0 >/dev/null 2>&1 || true
+  tmux set-option -t "$SESSION" base-index 0 >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" window-status-format ' #I:#W ' >/dev/null
+  tmux set-window-option -t "$SESSION" window-status-current-format '#[reverse] #I:#W #[default]' >/dev/null
+}
+
+refresh_env() {
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    [[ -n "${SSH_AUTH_SOCK:-}" ]] && tmux set-environment -t "$SESSION" SSH_AUTH_SOCK "$SSH_AUTH_SOCK" || true
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" OP_SERVICE_ACCOUNT_TOKEN "$OP_SERVICE_ACCOUNT_TOKEN" || true
+    [[ -n "${DISCORD_BOT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" DISCORD_BOT_TOKEN "$DISCORD_BOT_TOKEN" || true
+    [[ -n "${DISCORD_CHANNEL_ID:-}" ]] && tmux set-environment -t "$SESSION" DISCORD_CHANNEL_ID "$DISCORD_CHANNEL_ID" || true
+  fi
+}
+
+add_guide() {
+  local target="$1" page="$2" guide
+  guide="$(tmux split-window -v -l 11 -t "$target" -P -F '#{pane_id}' "$(pane_cmd guide "$page")")"
+  set_pane_title "$guide" "Shortcuts for $page"
+}
+
+new_page() {
+  local index="$1" name="$2" role="$3" title="$4" main
+  if [[ "$index" == "0" ]]; then
+    tmux new-session -d -s "$SESSION" -n "$name" "$(pane_cmd "$role" "$name")"
+    setup_tmux_options
+  else
+    tmux new-window -t "$SESSION:$index" -n "$name" "$(pane_cmd "$role" "$name")"
+  fi
+  main="$(tmux list-panes -t "$SESSION:$name" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "$title"
+  add_guide "$main" "$name"
+  tmux select-pane -t "$main" >/dev/null
+}
+
+new_editor_page() {
+  local main guide cmd
+  cmd="cd $(printf '%q' "$REPO_DIR") && export NVIM_APPNAME=$(printf '%q' "$NVIM_APPNAME_VALUE") && exec nvim ."
+  tmux new-window -t "$SESSION:1" -n editor "$cmd"
+  main="$(tmux list-panes -t "$SESSION:editor" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "Neovim editor - repo root"
+  guide="$(tmux split-window -v -l 11 -t "$main" -P -F '#{pane_id}' "$(pane_cmd editor-guide editor)")"
+  set_pane_title "$guide" "Neovim/Kickstart guide"
+  tmux select-pane -t "$main" >/dev/null
+}
+
+build_session() {
+  new_page 0 ops ops "Ops link - mission sessions and tmux topology"
+  new_editor_page
+  new_page 2 diff diff "Git diff + review loop"
+  new_page 3 browser browser "Browser testing surface"
+  new_page 4 agents agents "CLI coding agents + orchestration"
+  new_page 5 github github "GitHub PRs + architecture discussion"
+  new_page 6 obsidian obsidian "Obsidian vault + project notes"
+  new_page 7 discord discord "Discord API discussion workflow"
+  new_page 8 scratch scratch "Scratch shells"
+  tmux select-window -t "$SESSION:0"
+}
+
+require tmux
+require nvim
+require zsh
+chmod +x "$PANE" >/dev/null 2>&1 || true
+require "$PANE"
+
+if [[ "$RESET" -eq 1 ]] && tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux kill-session -t "$SESSION"
+fi
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  build_session
+else
+  setup_tmux_options
+fi
+refresh_env
+
+if [[ "$NO_ATTACH" -eq 1 ]]; then
+  echo "cmux: session ready: $SESSION"
+  tmux list-windows -t "$SESSION" -F '#{window_index}: #{window_name} panes=#{window_panes}'
+  echo "Attach: tmux attach -d -t $SESSION"
+  echo "Navigate: Ctrl-b w picker, Ctrl-b 0-8 direct pages, Ctrl-b z zoom, Ctrl-b d detach"
+else
+  exec tmux attach -d -t "$SESSION"
+fi

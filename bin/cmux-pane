@@ -1,0 +1,347 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROLE="${1:-ops}"
+PAGE="${2:-${ROLE}}"
+SESSION="${CMUX_SESSION:-cmux}"
+TITLE="${CMUX_TITLE:-CMUX Agent Workbench}"
+REPO_DIR="${CMUX_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
+NVIM_APPNAME_VALUE="${CMUX_NVIM_APPNAME:-nvim}"
+BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}"
+GITHUB_REPO="${CMUX_GITHUB_REPO:-DanDo385/hermes-cli-cockpit}"
+
+hr() { printf '%*s\n' "${COLUMNS:-100}" '' | tr ' ' '-'; }
+now() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+
+header() {
+  clear || true
+  printf '%s :: %s\n' "$TITLE" "$1"
+  printf 'Session: %s   Repo: %s   Time: %s\n' "$SESSION" "$REPO_DIR" "$(now)"
+  hr
+  printf '\n'
+}
+
+loop() {
+  local title="$1" delay="$2"
+  shift 2
+  while true; do
+    header "$title"
+    "$@" 2>&1 || true
+    printf '\n'
+    hr
+    printf 'Refresh: every %ss   Ctrl-c stops this pane command   Ctrl-b z zoom   Ctrl-b d detach\n' "$delay"
+    sleep "$delay"
+  done
+}
+
+present() {
+  if command -v "$1" >/dev/null 2>&1; then
+    printf '  %-14s ✅ %s\n' "$1" "$(command -v "$1")"
+  else
+    printf '  %-14s ⚪ missing\n' "$1"
+  fi
+}
+
+show_guide() {
+  cat <<GUIDE
+PAGE SHORTCUTS
+  Ctrl-b w       page picker
+  Ctrl-b n / p   next / previous page
+  Ctrl-b 0-8     jump by bottom-bar number
+  Ctrl-b arrows  move between panes
+  Ctrl-b z       zoom current pane
+  Ctrl-b d       detach safely
+
+WINDOWS
+  0 ops       links to mission-hermes / mission-openclaw
+  1 editor    Neovim with Kickstart-style config
+  2 diff      git status, diff, review loop
+  3 browser   browser/test URLs and smoke commands
+  4 agents    Codex, Claude, OpenCode, agent-deck readiness
+  5 github    PR status and architecture discussion workflow
+  6 obsidian  vault/project notes
+  7 discord   Discord API readiness and discussion drafts
+  8 scratch   build/test/recovery shells
+
+THIS PAGE
+GUIDE
+  case "$PAGE" in
+    ops) printf '  Use this as the bridge to live Hermes/OpenClaw mission-control sessions.\n' ;;
+    editor) printf '  Main pane runs nvim. Guide pane documents Kickstart and external-edit safety.\n' ;;
+    diff) printf '  Inspect local changes before any add/commit/push.\n' ;;
+    browser) printf '  Open local URLs and run curl/browser smoke checks.\n' ;;
+    agents) printf '  Launch CLI coding tools deliberately. Prefer worktrees for parallel agents.\n' ;;
+    github) printf '  Watch PR state and draft architecture discussion without surprise posting.\n' ;;
+    obsidian) printf '  Jump into the vault and project docs. Keep private notes out of public commits.\n' ;;
+    discord) printf '  Check API readiness. Posting requires explicit command/content/channel.\n' ;;
+    scratch) printf '  Free shells. Use tests before committing.\n' ;;
+    *) printf '  General cmux workbench pane.\n' ;;
+  esac
+}
+
+show_editor_guide() {
+  cat <<EDITOR
+NEOVIM / KICKSTART GUIDE
+  Active appname:  $NVIM_APPNAME_VALUE
+  Config path:     $HOME/.config/$NVIM_APPNAME_VALUE/init.lua
+  Repo root:       $REPO_DIR
+
+Kickstart mental model:
+  init.lua is the starter cockpit for plugins, keymaps, LSP, Telescope, Git UI, and file navigation.
+  This machine currently has a Lazy.nvim/Telescope/Yazi-style config under ~/.config/nvim.
+
+Hermes/OpenClaw external edit safety:
+  Neovim should use autoread/checktime so files patched by agents refresh cleanly.
+  Verify inside nvim:
+    :set autoread?
+    :checktime
+
+Useful default-ish keys in this config:
+  Space is leader
+  Space+f style mappings are usually file/search actions if configured
+  Ctrl-b remains tmux prefix outside Neovim
+
+If you want a clean Kickstart sandbox later:
+  git clone https://github.com/nvim-lua/kickstart.nvim ~/.config/nvim-kickstart
+  CMUX_NVIM_APPNAME=nvim-kickstart cmux --reset
+EDITOR
+}
+
+show_ops() {
+  printf 'CMUX purpose\n'
+  printf '  Workbench for editing, review, testing, GitHub/Discord discussion loops, and agent orchestration.\n'
+  printf '  It references mission sessions instead of replacing them. Mission remains ops/control plane.\n\n'
+
+  printf 'Live mission sessions\n'
+  tmux list-sessions -F '  #{session_name}: windows=#{session_windows} attached=#{session_attached} created=#{session_created_string}' 2>/dev/null | sed -n '/mission/p;/cmux/p' || true
+
+  cat <<'OPS'
+
+Attach commands
+  tmux attach -d -t mission-hermes      # Hermes production/stable cockpit
+  tmux attach -d -t mission-openclaw    # OpenClaw dev/sandbox cockpit
+  tmux attach -d -t cmux                # this coding workbench
+
+Safe rebuilds
+  mission-hermes --reset       # rebuild Hermes cockpit layout only
+  mission-openclaw --reset     # rebuild OpenClaw cockpit layout only
+  cmux --reset                 # rebuild coding workbench layout only
+
+Important boundary
+  mission-* observes gateways, cron, ports, logs, heartbeat.
+  cmux edits code, reviews diffs, opens browser/test surfaces, and drafts discussions.
+OPS
+}
+
+show_diff() {
+  cd "$REPO_DIR"
+  printf 'Git status\n'
+  git status --short --branch || true
+  printf '\nLast commit\n'
+  git log -1 --pretty='  %h %G? %s%n  %b' || true
+  printf '\nSync with upstream\n'
+  branch="$(git branch --show-current 2>/dev/null || true)"
+  if [[ -n "$branch" ]] && git rev-parse --verify "origin/$branch" >/dev/null 2>&1; then
+    printf '  ahead behind: '
+    git rev-list --left-right --count "HEAD...origin/$branch" || true
+  else
+    printf '  no origin/%s ref yet\n' "$branch"
+  fi
+  printf '\nDiff summary\n'
+  git diff --stat || true
+  printf '\nStaged summary\n'
+  git diff --cached --stat || true
+  cat <<'DIFF'
+
+Review commands
+  git diff --check
+  git diff
+  git diff --cached
+  git log --oneline --decorate -10
+  git add <paths>
+  git commit -m "feat(scope): short summary" -m "Longer why/comments."
+  git push
+
+Optional diff viewers if installed
+  git diff | delta
+  git difftool --tool=difftastic
+DIFF
+}
+
+show_browser() {
+  printf 'Browser/test target\n'
+  printf '  CMUX_BROWSER_URL=%s\n\n' "$BROWSER_URL"
+  printf 'Browser tools\n'
+  present open
+  present curl
+  present python3
+  present playwright
+  present npx
+  cat <<BROWSER
+
+Open/smoke commands
+  open "$BROWSER_URL"
+  curl -I "$BROWSER_URL"
+  python3 -m http.server 4175 --directory "$REPO_DIR/web"
+  CMUX_BROWSER_URL=http://127.0.0.1:4175/hermes/ cmux --reset
+
+Testing rule
+  Build/test passing is not the same as browser runtime verified.
+  For UI changes, load the affected URL and check for runtime/console errors.
+BROWSER
+}
+
+show_agents() {
+  printf 'CLI coding and orchestration tools\n'
+  present codex
+  present claude
+  present opencode
+  present agent-deck
+  present git
+  present tmux
+  cat <<'AGENTS'
+
+Recommended use
+  codex      focused code edits, tests, repo tasks
+  claude     large refactors/reviews when available
+  opencode   alternative coding agent / review loop
+  agent-deck orchestration dashboard if installed later
+
+Safety model
+  1. Inspect diff before delegating.
+  2. Prefer one agent per git worktree for parallel edits.
+  3. Never let two agents patch the same files blindly.
+  4. Run tests before commit.
+  5. Do not paste secrets into agent prompts or visible tmux panes.
+
+Useful worktree commands
+  git worktree list
+  git worktree add ../hermes-cli-cockpit-agent-a -b agent/a
+  git worktree remove ../hermes-cli-cockpit-agent-a
+AGENTS
+}
+
+show_github() {
+  cd "$REPO_DIR"
+  printf 'GitHub target\n'
+  printf '  Repo: %s\n' "$GITHUB_REPO"
+  printf '  Remote: '
+  git remote get-url origin 2>/dev/null || true
+  printf '\nAuth/status\n'
+  if command -v gh >/dev/null 2>&1; then
+    gh auth status 2>&1 | sed 's/^/  /' || true
+    printf '\nPRs\n'
+    gh pr list --repo "$GITHUB_REPO" --limit 10 2>&1 | sed 's/^/  /' || true
+  else
+    printf '  gh missing\n'
+  fi
+  cat <<'GITHUB'
+
+Architecture discussion draft
+  Title: CMUX workbench architecture: ops plane vs coding plane
+  Body bullets:
+    - mission-hermes / mission-openclaw remain operational control surfaces.
+    - cmux is the code/review/test/discussion workbench.
+    - Neovim owns active editing; agents patch via git-visible diffs.
+    - Browser, GitHub, Obsidian, and Discord panes make feedback loops visible.
+    - Missing tools degrade to instructions rather than breaking the layout.
+
+Commands when gh auth is healthy
+  gh repo view
+  gh pr status
+  gh issue create --title "CMUX workbench architecture" --body-file docs/cmux.md
+  gh pr create --title "feat: add cmux agent workbench" --body "..."
+GITHUB
+}
+
+show_obsidian() {
+  printf 'Vault\n'
+  printf '  %s\n\n' "$VAULT"
+  printf 'Project notes\n'
+  for rel in \
+    'projects/hermes-cli-cockpit' \
+    'agent-hermes/notes/next-steps.md' \
+    'agent-hermes/notes/open-items.md' \
+    'resources/docs' \
+    'resources/links'; do
+    p="$VAULT/$rel"
+    if [[ -e "$p" ]]; then
+      printf '  ✅ %s\n' "$p"
+    else
+      printf '  ⚪ %s\n' "$p"
+    fi
+  done
+  cat <<OBSIDIAN
+
+Open commands
+  nvim "$VAULT/projects/hermes-cli-cockpit"
+  nvim "$VAULT/agent-hermes/notes/next-steps.md"
+  open "obsidian://open?vault=hermes&file=projects/hermes-cli-cockpit"
+
+Boundary rule
+  Public repo docs must be sanitized.
+  Private hostnames, account details, Tailscale specifics, tokens, raw logs, and private Discord content stay in the vault.
+OBSIDIAN
+}
+
+show_discord() {
+  printf 'Discord API readiness\n'
+  if [[ -n "${DISCORD_BOT_TOKEN:-}" ]]; then
+    printf '  DISCORD_BOT_TOKEN: present\n'
+  else
+    printf '  DISCORD_BOT_TOKEN: missing from this pane env\n'
+  fi
+  if [[ -n "${DISCORD_CHANNEL_ID:-}" ]]; then
+    printf '  DISCORD_CHANNEL_ID: present\n'
+  else
+    printf '  DISCORD_CHANNEL_ID: missing from this pane env\n'
+  fi
+  present curl
+  present jq
+  cat <<'DISCORD'
+
+Discussion workflow
+  1. Draft content locally first in docs/cmux.md or an Obsidian project note.
+  2. Pick an explicit channel/thread ID.
+  3. Post only after confirming the destination and text.
+  4. Verify by fetching the created message ID.
+
+Safe API shape, do not paste tokens into the terminal history:
+  python3 scripts/post-discord-discussion.py --channel-id "$DISCORD_CHANNEL_ID" --file docs/cmux.md --dry-run
+
+Discussion starter ideas
+  - "Should cmux stay repo-specific or become a general cockpit generator?"
+  - "What belongs in mission-hermes vs cmux? Ops plane vs coding plane."
+  - "Agent orchestration safety: worktrees, diff gates, and PR handoff rules."
+DISCORD
+}
+
+show_scratch() {
+  cd "$REPO_DIR"
+  exec zsh -l
+}
+
+case "$ROLE" in
+  guide)
+    show_guide
+    exec zsh -l
+    ;;
+  editor-guide)
+    show_editor_guide
+    exec zsh -l
+    ;;
+  ops) loop 'Ops link' 10 show_ops ;;
+  diff) loop 'Git diff/review' 8 show_diff ;;
+  browser) loop 'Browser/test surface' 15 show_browser ;;
+  agents) loop 'Agent orchestration' 15 show_agents ;;
+  github) loop 'GitHub PR/discussion' 20 show_github ;;
+  obsidian) loop 'Obsidian vault' 20 show_obsidian ;;
+  discord) loop 'Discord discussion workflow' 20 show_discord ;;
+  scratch) show_scratch ;;
+  *)
+    header "Unknown role"
+    printf 'Unknown cmux role: %s\n' "$ROLE"
+    exit 2
+    ;;
+esac

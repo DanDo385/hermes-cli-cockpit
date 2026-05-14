@@ -19,3 +19,7 @@ host = "mbp-control-plane"
 web = 4174
 dev_gateway = 19001
 browser_control = 19003
+
+[cmux-workbench]
+host = "mbp-control-plane"
+browser_test_web = 4175

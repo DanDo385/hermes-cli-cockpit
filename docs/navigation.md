@@ -10,6 +10,8 @@ Hermes CLI Cockpit uses tmux. In tmux, the "pages" across the bottom are called 
 4. Use `Ctrl-b z` to zoom a noisy pane.
 5. Use `Ctrl-b d` to detach safely. The cockpit keeps running.
 
+For coding/review/browser/GitHub/Discord work, run `cmux`. It references the mission sessions but keeps code editing out of the ops cockpit.
+
 Legacy note: `mission` still opens the original Hermes `mission-control` session.
 
 ## Core keyboard model
@@ -42,6 +44,7 @@ The mirrored sessions are:
 ```text
 mission-hermes     tmux session mission-hermes
 mission-openclaw   tmux session mission-openclaw
+cmux               tmux session cmux
 ```
 
 Every window includes a bottom shortcut pane. Use the numbers shown in the bottom tmux bar. If a live session predates a layout change, run `mission-hermes --reset` or `mission-openclaw --reset` to rebuild the cockpit pages.
@@ -77,6 +80,7 @@ Detach means the cockpit keeps running on the MBP. You can reattach later with:
 ```bash
 mission-hermes
 mission-openclaw
+cmux
 ```
 
 or directly:

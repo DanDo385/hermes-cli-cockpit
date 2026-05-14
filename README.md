@@ -28,6 +28,7 @@ Keep this public repo sanitized. Do not copy private hostnames, secrets, account
 bin/mission --no-attach
 bin/mission-hermes --no-attach
 bin/mission-openclaw --no-attach
+bin/cmux --no-attach
 bin/hermes-health
 bin/ports
 bin/ports --registry config/ports.toml
@@ -40,6 +41,7 @@ Installed commands during local development:
 mission                 # legacy/current Hermes cockpit: mission-control
 mission-hermes          # mirrored Hermes cockpit: mission-hermes
 mission-openclaw        # mirrored OpenClaw dev cockpit: mission-openclaw
+cmux                    # coding/review/test/discussion workbench: cmux
 mission-web-hermes      # static Hermes mission page, default port 4173
 mission-web-openclaw    # static OpenClaw mission page, default port 4174
 hermes-health
@@ -47,7 +49,7 @@ ports
 port-who 3000
 ```
 
-- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
+- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cmux`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
 - `config/ports.toml` is the local active port registry. `config/ports.example.toml` is a copyable template.
 - `ports` classifications: `REGISTERED` active known listener, `UNKNOWN` active unregistered listener, `EXPECTED_DOWN` registered port not listening, `CONFLICT` duplicate service claims.
 
@@ -78,6 +80,18 @@ OpenClaw static page:  4174
 OpenClaw dev gateway:  19001
 OpenClaw browser ctrl: 19003
 ```
+
+## CMUX workbench
+
+`cmux` is the code/edit/review/test/discussion layer that references the live mission sessions without replacing them.
+
+```text
+mission-hermes      Hermes operations/control plane
+mission-openclaw    OpenClaw dev/sandbox operations/control plane
+cmux                repo editing, review, browser testing, PRs, Obsidian, Discord discussions
+```
+
+See `docs/cmux.md` for the window map, Neovim/Kickstart setup, agent orchestration rules, GitHub discussion draft, and dry-run-first Discord API helper.
 
 OpenClaw defaults to `--dev` and loopback gateway operation. For iMac access to the OpenClaw dashboard, prefer SSH/Tailscale port forwarding over broad unauthenticated exposure.
 
