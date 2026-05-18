@@ -1,0 +1,79 @@
+# Hermes CLI Cockpit workspace registry
+#
+# Purpose:
+# - local iMac native cmux is the visual/browser client
+# - MBP remote tmux owns persistent multi-pane/window sessions
+# - launchd/systemd owns durable gateways
+# - this file is documentation/config only; it does not start services
+
+[topology]
+local_visual_client = "iMac native cmux"
+remote_runtime = "MBP tmux over SSH/Tailscale"
+remote_alias = "ai-remote"
+vault_path = "/Users/openclaw/.hermes/workspace"
+repo_path = "/Users/openclaw/Code/hermes-cli-cockpit"
+rule = "cmux is the local visual client; tmux is the remote persistence layer; launchd/systemd owns gateways"
+
+[[workspace]]
+id = "hermes"
+number = 1
+title = "Hermes Ops"
+plane = "runtime-ops"
+local_surface = "native-cmux-workspace"
+remote_tmux_session = "mission-hermes"
+attach_command = "tmux attach -t mission-hermes"
+cmux_remote_command = "cmux ssh ai-remote"
+primary_browser_target = "obsidian://open?vault=hermes"
+secondary_browser_target = "http://127.0.0.1:4173/"
+notes = "Stable Hermes setup: production gateway visibility, cron, sessions, Obsidian vault, logs, ports, and safe operator runbooks."
+
+[[workspace]]
+id = "openclaw"
+number = 2
+title = "OpenClaw Ops"
+plane = "runtime-ops"
+local_surface = "native-cmux-workspace"
+remote_tmux_session = "mission-openclaw"
+attach_command = "tmux attach -t mission-openclaw"
+cmux_remote_command = "cmux ssh ai-remote"
+primary_browser_target = "obsidian://open?vault=hermes&file=projects/hermes-cli-cockpit"
+secondary_browser_target = "http://127.0.0.1:4174/"
+normal_gateway_status = "openclaw gateway status"
+normal_gateway_run = "openclaw gateway run"
+normal_gateway_start = "openclaw gateway start"
+lab_gateway_run = "openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact"
+notes = "OpenClaw setup should support normal gateway operation when Dan wants to use OpenClaw. Dev/loopback remains the debugging lab, not the only path."
+
+[[workspace]]
+id = "code"
+number = 3
+title = "Code Workbench"
+plane = "coding"
+local_surface = "native-cmux-workspace-with-browser"
+remote_tmux_session = "cockpit-workbench"
+attach_command = "tmux attach -t cockpit-workbench"
+cmux_remote_command = "cmux ssh ai-remote"
+primary_browser_target = "http://localhost:3000/"
+secondary_browser_target = "http://localhost:4175/"
+notes = "Neovim plus CLI coding agents, git diff/review, tests/builds, JS/React/Next browser previews, Obsidian project context, and GitHub PR status."
+
+[[workspace]]
+id = "agent-deck"
+number = 4
+title = "Agent Deck"
+plane = "orchestration"
+local_surface = "native-cmux-workspace-with-terminal-and-browser"
+remote_tmux_session = "agentdeck-home"
+attach_command = "tmux -L agent-deck attach -t agentdeck-home"
+cmux_remote_command = "cmux ssh ai-remote"
+primary_browser_target = "GitHub PR/discussion page for active project"
+secondary_browser_target = "Discord/community workflow preview"
+notes = "Agent-deck owns multi-agent orchestration. Use one agent per git worktree; fold open-source tracking, GitHub discussions, and Discord review here unless the work belongs inside Code Workbench."
+
+[worktree_policy]
+default_root = "/Users/openclaw/Code/worktrees"
+branch_prefix = "agent/"
+rule_1 = "one agent, one branch, one worktree"
+rule_2 = "agents do not commit to main"
+rule_3 = "operator reviews diffs before merge"
+rule_4 = "external GitHub/Discord posting is draft-first and requires explicit send/post"

@@ -30,6 +30,8 @@ bin/mission-hermes --no-attach
 bin/mission-openclaw --no-attach
 bin/cmux --no-attach
 bin/cctx
+bin/cockpit-workspaces list
+bin/cockpit-workspaces commands openclaw
 bin/hermes-health
 bin/ports
 bin/ports --registry config/ports.toml
@@ -41,9 +43,10 @@ Installed commands during local development:
 ```bash
 mission                 # legacy/current Hermes cockpit: mission-control
 mission-hermes          # mirrored Hermes cockpit: mission-hermes
-mission-openclaw        # mirrored OpenClaw dev cockpit: mission-openclaw
-cmux                    # coding/review/test/discussion workbench: cmux
+mission-openclaw        # mirrored OpenClaw cockpit: mission-openclaw
+cmux                    # tmux-backed coding/review/test/discussion workbench helper, to be renamed before official cmux owns PATH
 cctx                    # cwd/project/session context card for cmux
+cockpit-workspaces      # read-only iMac cmux -> MBP tmux workspace cards
 mission-web-hermes      # static Hermes mission page, default port 4173
 mission-web-openclaw    # static OpenClaw mission page, default port 4174
 hermes-health
@@ -51,7 +54,7 @@ ports
 port-who 3000
 ```
 
-- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cmux`, `~/.local/bin/cctx`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
+- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cmux`, `~/.local/bin/cctx`, `~/.local/bin/cockpit-workspaces`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
 - `config/ports.toml` is the local active port registry. `config/ports.example.toml` is a copyable template.
 - `ports` classifications: `REGISTERED` active known listener, `UNKNOWN` active unregistered listener, `EXPECTED_DOWN` registered port not listening, `CONFLICT` duplicate service claims.
 
@@ -79,7 +82,7 @@ Default page ports:
 ```text
 Hermes static page:    4173
 OpenClaw static page:  4174
-OpenClaw dev gateway:  19001
+OpenClaw lab gateway:  19001
 OpenClaw browser ctrl: 19003
 ```
 
@@ -89,8 +92,9 @@ OpenClaw browser ctrl: 19003
 
 ```text
 mission-hermes      Hermes operations/control plane
-mission-openclaw    OpenClaw dev/sandbox operations/control plane
+mission-openclaw    OpenClaw operations/control plane; normal gateway capable, dev/lab mode for debugging
 cmux                repo editing, review, browser testing, PRs, Obsidian, Discord discussions
+cockpit-workspaces  read-only cards for the iMac native-cmux -> MBP remote-tmux layout
 ```
 
 The current implementation is a tmux-backed flexible workspace deck inspired by native cmux:
@@ -125,7 +129,16 @@ When the training wheels get annoying, launch without guide panes:
 CMUX_GUIDE_MODE=off cmux --reset
 ```
 
-OpenClaw defaults to `--dev` and loopback gateway operation. For iMac access to the OpenClaw dashboard, prefer SSH/Tailscale port forwarding over broad unauthenticated exposure.
+OpenClaw has two supported operator modes:
+
+```text
+normal mode   openclaw gateway status/run/start/install
+lab mode      openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact
+```
+
+Use normal mode when Dan wants OpenClaw available as an assistant. Use dev/loopback mode for debugging gateway behavior, queueing, or crash isolation. The cockpit documents both, but it should not install/start/stop a persistent OpenClaw service without an explicit operator decision.
+
+For iMac access to OpenClaw pages or gateway surfaces, prefer native cmux SSH browser routing or SSH/Tailscale forwarding over broad unauthenticated exposure.
 
 ## Project goals
 

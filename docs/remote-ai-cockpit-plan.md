@@ -4,7 +4,7 @@
 
 ## Goal
 
-Build a remote AI cockpit where the local Mac runs native cmux as the terminal/browser/notification client, while the remote host owns persistent tmux sessions, Hermes/OpenClaw gateways, Neovim/Kickstart, browser-test servers, Obsidian vault access, Discord/API helpers, and agent-deck orchestration.
+Build a remote AI cockpit where the iMac runs native cmux as the terminal/browser/notification client, while the MBP owns persistent tmux sessions, Hermes/OpenClaw gateways, Neovim/Kickstart, browser-test servers, Obsidian vault access, Discord/API helpers, and agent-deck orchestration. The MBP should not be treated as a native cmux host; it is the remote tmux/runtime host reached through cmux SSH over Tailscale.
 
 ## Current source findings, checked 2026-05-14
 
@@ -33,27 +33,45 @@ Reason: official cmux automation commands like `cmux ssh`, `cmux notify`, `cmux 
 
 ## Session model
 
-Preferred model: one cmux window, several vertical workspaces, each attached to stable remote tmux sessions.
+Preferred model: one iMac native cmux window, four vertical workspaces, each attached to stable MBP tmux/runtime sessions.
 
 ```text
-Local Mac
+iMac
 └── cmux native app
-    ├── Workspace: Hermes Ops       -> cmux ssh remote -> tmux attach -t mission-hermes
-    ├── Workspace: OpenClaw Dev     -> cmux ssh remote -> tmux attach -t mission-openclaw
-    ├── Workspace: Code Workbench   -> cmux ssh remote -> tmux attach -t cockpit-workbench
-    ├── Workspace: Agent Deck       -> cmux ssh remote -> tmux attach -t agentdeck-home OR agent-deck
-    └── Browser panes               -> routed through remote workspace network
+    ├── Workspace 1: Hermes Ops       -> cmux ssh MBP -> tmux attach -t mission-hermes
+    │   └── browser: Obsidian vault / Hermes static page
+    ├── Workspace 2: OpenClaw Ops     -> cmux ssh MBP -> tmux attach -t mission-openclaw
+    │   └── browser: OpenClaw page/gateway UI / Obsidian project note
+    ├── Workspace 3: Code Workbench   -> cmux ssh MBP -> tmux attach -t cockpit-workbench
+    │   └── browser: JS/React/Next app preview and smoke-test surface
+    └── Workspace 4: Agent Deck       -> cmux ssh MBP -> agent-deck / tmux -L agent-deck
+        └── browser: GitHub discussion/PR + Discord/community surfaces
 
-Remote host
+MBP remote host
 ├── tmux session: mission-hermes
 ├── tmux session: mission-openclaw
 ├── tmux session: cockpit-workbench
 ├── agent-deck's isolated tmux server: tmux -L agent-deck
 ├── Hermes gateway owned by launchd/systemd, not ad-hoc tmux
-├── OpenClaw dev gateway loopback/sandbox by default
+├── OpenClaw gateway: normal mode available; dev/loopback mode for debugging
 ├── Neovim/Kickstart
 └── /Users/openclaw/.hermes/workspace Obsidian vault
 ```
+
+## OpenClaw gateway operating modes
+
+OpenClaw should not be hard-coded as dev-only. The cockpit supports two explicit modes:
+
+```text
+normal mode   openclaw gateway status
+              openclaw gateway run
+              openclaw gateway start   # service-owned path; operator approval required
+              openclaw gateway install # persistent service install; operator approval required
+
+lab mode      openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact
+```
+
+Use normal mode when Dan wants OpenClaw available as a real assistant. Use lab mode for queue/gateway experiments, crash isolation, and source-level debugging. The cockpit may show these commands, but must not install/start/stop a persistent OpenClaw service automatically.
 
 ## Files to create or update
 
@@ -333,7 +351,8 @@ Because cmux SSH browser panes route through the remote network, `localhost:4175
 - For one-shot work, use `hermes chat -q ...` with explicit timeout or background process.
 - Enable browser/discord/file/terminal toolsets in Hermes only where needed; start new sessions after tool changes.
 - Use `/Users/openclaw/.hermes/workspace` as the canonical Obsidian vault/workspace path.
-- Keep OpenClaw dev gateway loopback/sandboxed unless explicitly promoting it.
+- Support OpenClaw normal gateway operation when Dan wants to use OpenClaw; use dev/loopback mode for debugging or gateway comparison labs.
+- Never install/start/stop a persistent OpenClaw service from a cockpit pane without explicit operator approval.
 
 ## Security considerations
 

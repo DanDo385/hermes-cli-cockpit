@@ -7,7 +7,8 @@ AGENT="${MISSION_AGENT:-hermes}"
 TITLE="${MISSION_TITLE:-Hermes Mission Control}"
 REPO_DIR="${MISSION_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-OPENCLAW_PROFILE_FLAG="${OPENCLAW_PROFILE_FLAG:---dev}"
+OPENCLAW_PROFILE_FLAG="${OPENCLAW_PROFILE_FLAG-}"
+OPENCLAW_MODE="${OPENCLAW_MODE:-normal}"
 OPENCLAW_LOG_FILE="${OPENCLAW_LOG_FILE:-/tmp/openclaw/openclaw-$(date +%F).log}"
 HERMES_LOG_DIR="${HERMES_LOG_DIR:-$HERMES_HOME/logs}"
 WEB_PORT="${MISSION_WEB_PORT:-}"
@@ -47,7 +48,11 @@ loop() {
 
 agent_cmd() {
   if [[ "$AGENT" == "openclaw" ]]; then
-    printf 'openclaw %s' "$OPENCLAW_PROFILE_FLAG"
+    if [[ -n "$OPENCLAW_PROFILE_FLAG" ]]; then
+      printf 'openclaw %s' "$OPENCLAW_PROFILE_FLAG"
+    else
+      printf 'openclaw'
+    fi
   else
     printf 'hermes'
   fi
@@ -55,7 +60,11 @@ agent_cmd() {
 
 run_agent() {
   if [[ "$AGENT" == "openclaw" ]]; then
-    command openclaw $OPENCLAW_PROFILE_FLAG "$@"
+    if [[ -n "$OPENCLAW_PROFILE_FLAG" ]]; then
+      command openclaw "$OPENCLAW_PROFILE_FLAG" "$@"
+    else
+      command openclaw "$@"
+    fi
   else
     command hermes "$@"
   fi
@@ -104,12 +113,16 @@ GUIDE
 show_overview() {
   printf 'Operator model\n'
   printf '  launchd owns durable production services. tmux owns visibility and manual control.\n'
-  printf '  Hermes remains production/stable. OpenClaw should be dev/sandbox unless explicitly promoted.\n\n'
+  printf '  Hermes remains production/stable. OpenClaw mode: %s; dev/loopback is available for debugging.\n\n' "$OPENCLAW_MODE"
 
   printf 'CLI entrypoints\n'
   printf '  Chat/TUI:        '
   if [[ "$AGENT" == "openclaw" ]]; then
-    printf 'openclaw %s tui\n' "$OPENCLAW_PROFILE_FLAG"
+    if [[ -n "$OPENCLAW_PROFILE_FLAG" ]]; then
+      printf 'openclaw %s tui\n' "$OPENCLAW_PROFILE_FLAG"
+    else
+      printf 'openclaw tui\n'
+    fi
   else
     printf 'hermes\n'
   fi
@@ -132,8 +145,9 @@ show_overview() {
     cat <<'OCURL'
 
 OpenClaw remote-view safety:
-  Current recommended iMac path is an SSH/Tailscale tunnel, not broad unauthenticated exposure:
-    ssh -N -L 19001:127.0.0.1:19001 -L 19003:127.0.0.1:19003 openclaw-mbp
+  iMac native cmux browser panes should ride the cmux SSH workspace when available.
+  Plain SSH/Tailscale tunnel fallback:
+    ssh -N -L 19001:127.0.0.1:19001 -L 19003:127.0.0.1:19003 ai-remote
   Then browse on iMac:
     http://127.0.0.1:19001/
   Direct tailnet exposure should use token auth, not --auth none.
@@ -168,15 +182,25 @@ show_gateway() {
     cat <<'OCG'
 
 Useful OpenClaw gateway commands:
-  openclaw --dev gateway status
-  openclaw --dev gateway health
-  openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact
-  openclaw --dev gateway run --port 19001 --bind tailnet --auth token --allow-unconfigured --verbose --compact
-  openclaw --dev dashboard --no-open
-  openclaw --dev logs --limit 120 --plain
+  Normal mode (use OpenClaw as an assistant):
+    openclaw gateway status
+    openclaw gateway health
+    openclaw gateway run
+    openclaw gateway start      # persistent service path; operator approval required
+    openclaw gateway install    # persistent service install; operator approval required
+
+  Lab/debug mode (crash/queue/source investigation):
+    openclaw --dev gateway status
+    openclaw --dev gateway health
+    openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact
+    openclaw --dev gateway run --port 19001 --bind tailnet --auth token --allow-unconfigured --verbose --compact
+    openclaw --dev dashboard --no-open
+    openclaw --dev logs --limit 120 --plain
 
 Safety:
-  Loopback is safest. Use SSH/Tailscale forwarding to view from iMac.
+  Normal mode is allowed when Dan chooses to use OpenClaw.
+  Do not install/start/stop a persistent OpenClaw service from a pane without explicit operator approval.
+  Loopback is safest for lab mode. Use cmux SSH browser routing or SSH/Tailscale forwarding to view from iMac.
   If exposing directly to the tailnet, prefer auth=token and never paste tokens into visible panes.
 OCG
   else

@@ -38,7 +38,7 @@ This plane owns visibility into:
 - `mission-hermes` tmux session on the MBP/remote host.
 - `mission-openclaw` tmux session on the MBP/remote host.
 - Hermes gateway status and logs.
-- OpenClaw dev gateway status and sandbox logs.
+- OpenClaw normal gateway status plus dev/loopback lab commands for debugging.
 - Hermes cron registry, latest outputs, routes, failures, and no-agent watchdog jobs.
 - Session store and session-search/export workflows.
 - Obsidian vault navigation and project notes.
@@ -49,16 +49,18 @@ This plane owns visibility into:
 Best surface:
 
 ```text
-Native cmux workspace: Hermes Ops
-└── cmux ssh MBP/remote
-    └── tmux attach -t mission-hermes
+Native cmux workspace 1: Hermes Ops
+├── cmux ssh MBP/remote
+│   └── tmux attach -t mission-hermes
+└── browser surface: Obsidian vault / Hermes static page
 
-Native cmux workspace: OpenClaw Ops
-└── cmux ssh MBP/remote
-    └── tmux attach -t mission-openclaw
+Native cmux workspace 2: OpenClaw Ops
+├── cmux ssh MBP/remote
+│   └── tmux attach -t mission-openclaw
+└── browser surface: Obsidian project notes / OpenClaw page or gateway UI
 ```
 
-Keep these as separate workspaces. Do not merge them into the coding workbench. Mission cockpits should be boring, stable, and runtime-focused.
+Keep these as separate workspaces. Do not merge them into the coding workbench. Mission cockpits should be boring, stable, and runtime-focused. OpenClaw should support the normal gateway path (`openclaw gateway status/run/start/install`) when Dan wants to use OpenClaw; dev/loopback mode remains the debugging lab, not the only operating model.
 
 Recommended windows/cards inside each tmux mission cockpit:
 
@@ -95,11 +97,12 @@ This plane owns:
 Best surface:
 
 ```text
-Native cmux workspace: Code Workbench / Project Card
+Native cmux workspace 3: Code Workbench / Project Card
 ├── terminal pane: tmux attach -t cockpit-workbench
-├── browser pane: local app preview routed through remote network
-├── optional browser pane: GitHub PR/status/community thread
-└── optional terminal surface: focused agent CLI or scratch shell
+├── terminal pane: Neovim + CLI coding agents
+├── browser pane: JS/React/Next local app preview routed through remote network
+├── browser pane: GitHub PR/status/community thread when active
+└── scratch/action pane: tests, builds, ports, smoke checks
 ```
 
 Current tmux-backed repo helper already approximates this:
@@ -139,31 +142,31 @@ This plane owns:
 Best surface:
 
 ```text
-Native cmux workspace: Agent Board
+Native cmux workspace 4: Agent Deck
 ├── terminal pane: agent-deck on its own tmux socket/server
-├── terminal pane: Hermes Kanban/status summary
+├── terminal pane: worktree conductor / Hermes Kanban/status summary
 ├── browser pane: GitHub PR/discussion/community page
 ├── browser pane or CLI pane: Discord bot/component preview/dev logs
 └── scratch pane: operator escalation/action shell
 ```
 
-Design rule: do not reimplement agent-deck. Wrap it. The cockpit should surface agent-deck status and launch commands, while agent-deck owns its own tmux socket/server and session lifecycle.
+Design rule: do not reimplement agent-deck. Wrap it. The cockpit should surface agent-deck status and launch commands, while agent-deck owns its own tmux socket/server and session lifecycle. Use git worktrees as the safety primitive: one agent, one branch, one worktree; the operator reviews diffs before merge. Open-source tracking, GitHub discussions, and Discord workflows usually belong here, unless the active work is a single repo implementation loop better handled in Code Workbench.
 
 ## Recommended top-level cmux architecture
 
-Use one local native cmux window with separate vertical workspaces for the three planes:
+Use one local native cmux window on the iMac with four focused vertical workspaces. Each workspace reaches the MBP through SSH/Tailscale and uses tmux or agent-deck for process persistence:
 
 ```text
-Local cmux window: AI Cockpit
-├── Workspace 1: Hermes Ops      -> cmux ssh remote -> tmux mission-hermes
-├── Workspace 2: OpenClaw Ops    -> cmux ssh remote -> tmux mission-openclaw
-├── Workspace 3: Code Workbench  -> cmux ssh remote -> tmux cockpit-workbench
-├── Workspace 4: Agent Board     -> cmux ssh remote -> agent-deck / Hermes Kanban / worktrees
-├── Workspace 5: Browser Lab     -> cmux browser panes for app + GitHub + docs
-└── Workspace 6: Community Lab   -> Discord components/dev logs + GitHub discussions
+Local iMac cmux window: AI Cockpit
+├── Workspace 1: Hermes Ops      -> cmux ssh MBP -> tmux mission-hermes + Obsidian browser surface
+├── Workspace 2: OpenClaw Ops    -> cmux ssh MBP -> tmux mission-openclaw + OpenClaw/vault browser surface
+├── Workspace 3: Code Workbench  -> cmux ssh MBP -> tmux cockpit-workbench + JS/React/Next browser testing
+└── Workspace 4: Agent Deck      -> cmux ssh MBP -> agent-deck/worktrees + GitHub/Discord/community surfaces
 ```
 
-This is the best default because it preserves different failure domains:
+Browser Lab and Community Lab are not separate default workspaces anymore. They are built into Code Workbench and Agent Deck, because that keeps the sidebar smaller and matches the actual operator flow: browser testing belongs beside code, and open-source/community tracking belongs beside agent orchestration.
+
+This preserves different failure domains:
 
 - Ops can stay running while workbench layouts are rebuilt.
 - Coding experiments cannot accidentally kill gateway panes.
@@ -180,7 +183,7 @@ Verdict: bad default. It looks impressive but becomes cockpit soup. Use only for
 
 ### Option B: Three separate cmux windows
 
-One macOS window each for Ops, Coding, and Agent Board.
+One macOS window each for Ops, Coding, and Agent Deck.
 
 Verdict: useful on a large monitor. Worse on laptop screens because macOS window management becomes the new tax.
 
@@ -203,13 +206,13 @@ Verdict: not yet. cmux restores layout/metadata, not all live process state. Per
 2. Jump to Code Workbench.
    Pick project/context with cctx, edit in Neovim, run tests/builds.
 
-3. Open Browser Lab surface.
+3. Use the Code Workbench browser surface.
    Verify app runtime in cmux browser, capture screenshot/snapshot, inspect console/errors.
 
-4. Jump to Agent Board.
+4. Jump to Agent Deck.
    Start/fork/resume agent-deck sessions or Hermes/OpenClaw agents. Keep one agent per worktree.
 
-5. Jump to GitHub/Community surfaces.
+5. Review GitHub/community surfaces from Agent Deck.
    Inspect PR status, discussions, Discord/community feedback. Draft first, send only after review.
 
 6. Return to Hermes Ops.
@@ -317,13 +320,13 @@ Implementation rules:
 
 ## Recommendation summary
 
-The optimal workflow is not one workspace. It is one local cmux window with multiple specialized workspaces:
+The optimal workflow is one local iMac cmux window with four specialized workspaces:
 
 ```text
-Ops workspaces      = stable mission control for Hermes/OpenClaw runtime
-Workbench workspace = project-aware editor/test/browser/GitHub/Obsidian cockpit
-Agent Board         = agent-deck + Hermes Kanban + worktree/status/cost orchestration
-Browser/Community   = optional focused surfaces for app testing, GitHub, Discord
+Hermes Ops       = stable Hermes runtime, cron, sessions, vault/browser context
+OpenClaw Ops     = normal OpenClaw gateway-capable cockpit, with dev/lab fallback
+Code Workbench   = Neovim + CLI agents + JS/React/Next browser testing + GitHub/Obsidian
+Agent Deck       = agent-deck + git worktrees + open-source/GitHub/Discord tracking
 ```
 
 Use native cmux for local visual organization, browser panes, notifications, SSH workspaces, and automation. Use remote tmux for persistence. Use launchd/systemd for gateways. Use agent-deck for multi-agent orchestration. Use Obsidian for durable private context. Use the repo for sanitized, reproducible CLI tooling.

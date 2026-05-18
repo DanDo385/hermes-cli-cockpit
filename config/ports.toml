@@ -17,7 +17,7 @@ web = 4173
 [openclaw-mission-control]
 host = "mbp-control-plane"
 web = 4174
-dev_gateway = 19001
+lab_gateway = 19001
 browser_control = 19003
 
 [cmux-workbench]

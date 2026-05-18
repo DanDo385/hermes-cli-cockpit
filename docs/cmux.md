@@ -4,8 +4,9 @@
 
 ```text
 mission-hermes      Hermes operations/control plane
-mission-openclaw    OpenClaw dev/sandbox operations/control plane
-cmux                repo editing, review, test, browser, GitHub, Discord, Obsidian plane
+mission-openclaw    OpenClaw operations/control plane; normal gateway capable, dev/lab for debugging
+cmux                current tmux-backed workbench helper for code/review/test/browser/GitHub/Discord/Obsidian
+cockpit-workspaces  read-only map for the iMac native-cmux -> MBP remote-tmux layout
 ```
 
 The deeper design note lives at:
@@ -47,7 +48,10 @@ Local install target:
 
 ```text
 ~/.local/bin/cmux -> ~/Code/hermes-cli-cockpit/bin/cmux
+~/.local/bin/cockpit-workspaces -> ~/Code/hermes-cli-cockpit/bin/cockpit-workspaces
 ```
+
+Important: this repo's `cmux` is a temporary tmux-backed helper. Official native cmux should eventually own the `cmux` command, after this helper is renamed to `cockpit-workbench`.
 
 ## Workspace model
 
@@ -60,7 +64,22 @@ right/bottom    contextual scratch terminals near command lists
 ops bridge      Hermes/OpenClaw mission sessions remain reachable
 ```
 
-The current implementation is tmux-backed, but the nouns intentionally match the future native cmux adapter target.
+The current implementation is tmux-backed, but the nouns intentionally match the future native cmux adapter target. The target topology is:
+
+```text
+iMac native cmux = visual client, browser panes, workspace sidebar, notifications
+MBP tmux         = persistent multi-pane/window sessions
+launchd/systemd = durable gateway/service owner
+```
+
+Use `cockpit-workspaces list` to print the four native-cmux workspace cards:
+
+```text
+1 Hermes Ops      -> tmux mission-hermes + Obsidian/vault browser surface
+2 OpenClaw Ops    -> tmux mission-openclaw + normal OpenClaw gateway path
+3 Code Workbench  -> tmux cockpit-workbench + JS/React/Next browser testing
+4 Agent Deck      -> agent-deck + one-agent-one-worktree orchestration
+```
 
 ## Windows
 

@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Print the Hermes CLI Cockpit native-cmux/remote-tmux workspace plan.
+
+This command is intentionally read-only. It does not open cmux, attach tmux,
+start gateways, install launchd services, or post to external systems.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - current macOS env has py3.11+
+    tomllib = None
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = ROOT / "config" / "cockpit-workspaces.toml"
+
+
+def load_config(path: Path) -> dict:
+    if tomllib is None:
+        raise SystemExit("cockpit-workspaces: Python 3.11+ tomllib is required")
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(f"cockpit-workspaces: config not found: {path}")
+
+
+def workspaces(cfg: dict) -> list[dict]:
+    return sorted(cfg.get("workspace", []), key=lambda w: int(w.get("number", 999)))
+
+
+def find_workspace(cfg: dict, ident: str) -> dict:
+    ident = ident.lower()
+    for ws in workspaces(cfg):
+        if ident in {str(ws.get("id", "")).lower(), str(ws.get("number", "")), str(ws.get("title", "")).lower()}:
+            return ws
+    known = ", ".join(f"{w.get('number')}:{w.get('id')}" for w in workspaces(cfg))
+    raise SystemExit(f"unknown workspace {ident!r}; known: {known}")
+
+
+def cmux_available() -> str:
+    path = shutil.which("cmux")
+    if not path:
+        return "missing"
+    # The repo helper historically shadows official cmux. Flag that clearly.
+    try:
+        resolved = str(Path(path).resolve())
+    except OSError:
+        resolved = path
+    if resolved == str((ROOT / "bin" / "cmux").resolve()):
+        return f"shadowed-by-repo-helper ({path})"
+    return path
+
+
+def print_header(cfg: dict) -> None:
+    topo = cfg.get("topology", {})
+    print("Hermes CLI Cockpit workspace plan")
+    print("=" * 42)
+    print(f"local visual client : {topo.get('local_visual_client')}")
+    print(f"remote runtime      : {topo.get('remote_runtime')}")
+    print(f"remote alias        : {topo.get('remote_alias')}")
+    print(f"vault               : {topo.get('vault_path')}")
+    print(f"repo                : {topo.get('repo_path')}")
+    print(f"cmux on PATH        : {cmux_available()}")
+    print(f"rule                : {topo.get('rule')}")
+    print()
+
+
+def cmd_list(args: argparse.Namespace, cfg: dict) -> int:
+    print_header(cfg)
+    print("Workspaces")
+    for ws in workspaces(cfg):
+        print(f"  {ws.get('number')}. {ws.get('title'):<15} id={ws.get('id'):<10} tmux={ws.get('remote_tmux_session')} plane={ws.get('plane')}")
+    print()
+    print("Use: cockpit-workspaces show <id|number>  or  cockpit-workspaces commands <id|number>")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace, cfg: dict) -> int:
+    ws = find_workspace(cfg, args.workspace)
+    print_header(cfg)
+    print(f"Workspace {ws.get('number')}: {ws.get('title')} ({ws.get('id')})")
+    print("-" * 42)
+    for key in [
+        "plane",
+        "local_surface",
+        "remote_tmux_session",
+        "attach_command",
+        "cmux_remote_command",
+        "primary_browser_target",
+        "secondary_browser_target",
+        "notes",
+    ]:
+        if key in ws:
+            print(f"{key:24} {ws[key]}")
+    return 0
+
+
+def cmd_commands(args: argparse.Namespace, cfg: dict) -> int:
+    ws = find_workspace(cfg, args.workspace)
+    topo = cfg.get("topology", {})
+    remote = os.environ.get("AI_REMOTE", topo.get("remote_alias", "ai-remote"))
+    print(f"# {ws.get('title')} command card")
+    print("# Read-only unless you explicitly run one of these yourself.")
+    print()
+    print("# Local iMac native cmux workspace shell")
+    print(f"cmux ssh {remote}")
+    print()
+    print("# Remote MBP tmux attach inside that cmux SSH workspace")
+    print(ws.get("attach_command"))
+    print()
+    print("# Browser targets to keep beside the workspace")
+    for target in [ws.get("primary_browser_target"), ws.get("secondary_browser_target")]:
+        if target:
+            print(f"#   {target}")
+    if ws.get("id") == "openclaw":
+        print()
+        print("# OpenClaw normal gateway path")
+        print(ws.get("normal_gateway_status"))
+        print(ws.get("normal_gateway_run"))
+        print("# To make it service-owned, use only after deliberate operator approval:")
+        print(ws.get("normal_gateway_start"))
+        print()
+        print("# Debug/lab fallback, not the only OpenClaw path")
+        print(ws.get("lab_gateway_run"))
+    if ws.get("id") == "agent-deck":
+        policy = cfg.get("worktree_policy", {})
+        print()
+        print("# Worktree policy")
+        for key in sorted(policy):
+            print(f"#   {key}: {policy[key]}")
+    return 0
+
+
+def cmd_env(args: argparse.Namespace, cfg: dict) -> int:
+    ws = find_workspace(cfg, args.workspace)
+    topo = cfg.get("topology", {})
+    print(f"export COCKPIT_WORKSPACE_ID={sh_quote(str(ws.get('id')))}")
+    print(f"export COCKPIT_WORKSPACE_TITLE={sh_quote(str(ws.get('title')))}")
+    print(f"export COCKPIT_REMOTE_ALIAS={sh_quote(str(topo.get('remote_alias', 'ai-remote')))}")
+    print(f"export COCKPIT_REMOTE_TMUX_SESSION={sh_quote(str(ws.get('remote_tmux_session')))}")
+    print(f"export COCKPIT_VAULT_PATH={sh_quote(str(topo.get('vault_path', '')))}")
+    print(f"export COCKPIT_REPO_PATH={sh_quote(str(topo.get('repo_path', '')))}")
+    return 0
+
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Read-only Hermes CLI Cockpit workspace cards")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="workspace TOML config")
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("list", help="list the four cmux/tmux workspaces")
+
+    show = sub.add_parser("show", help="show one workspace card")
+    show.add_argument("workspace", help="workspace id, title, or number")
+
+    commands = sub.add_parser("commands", help="print operator commands for one workspace")
+    commands.add_argument("workspace", help="workspace id, title, or number")
+
+    env = sub.add_parser("env", help="print shell exports for one workspace")
+    env.add_argument("workspace", help="workspace id, title, or number")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    cfg = load_config(Path(args.config).expanduser())
+    command = args.command or "list"
+    if command == "list":
+        return cmd_list(args, cfg)
+    if command == "show":
+        return cmd_show(args, cfg)
+    if command == "commands":
+        return cmd_commands(args, cfg)
+    if command == "env":
+        return cmd_env(args, cfg)
+    parser.error(f"unknown command: {command}")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
