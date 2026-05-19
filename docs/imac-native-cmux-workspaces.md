@@ -37,7 +37,7 @@ The config defines command palette actions for:
 The terminal actions target the MBP over SSH/Tailscale:
 
 ```text
-openclaw@100.84.204.2
+openclaw@100.95.209.3
 ```
 
 ## iMac bootstrap sequence
@@ -65,7 +65,7 @@ The iMac must be able to SSH into the MBP without interactive prompts. The cmux 
 Expected MBP target:
 
 ```text
-openclaw@100.84.204.2
+openclaw@100.95.209.3
 ```
 
 Expected MBP tmux sessions:
@@ -78,7 +78,7 @@ mission-openclaw
 Probe from the iMac:
 
 ```bash
-ssh -o BatchMode=yes openclaw@100.84.204.2 'hostname; tmux list-sessions'
+ssh -o BatchMode=yes openclaw@100.95.209.3 'hostname; tmux list-sessions'
 ```
 
 If this fails with `Permission denied`, add the iMac public key to the MBP user's `~/.ssh/authorized_keys`, or configure Tailscale SSH.
