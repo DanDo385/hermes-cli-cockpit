@@ -164,7 +164,7 @@ Local iMac cmux window: AI Cockpit
 └── Workspace 4: Agent Deck      -> cmux ssh MBP -> agent-deck/worktrees + GitHub/Discord/community surfaces
 ```
 
-Browser Lab and Community Lab are not separate default workspaces anymore. They are built into Code Workbench and Agent Deck, because that keeps the sidebar smaller and matches the actual operator flow: browser testing belongs beside code, and open-source/community tracking belongs beside agent orchestration.
+Browser and community surfaces are embedded capabilities, not separate default workspaces. Browser testing belongs beside Code Workbench code, and open-source/community tracking belongs beside Agent Deck orchestration; this keeps the sidebar smaller and matches the actual operator flow.
 
 This preserves different failure domains:
 

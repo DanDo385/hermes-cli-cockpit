@@ -73,6 +73,9 @@ notes = "Agent-deck owns multi-agent orchestration. Use one agent per git worktr
 [worktree_policy]
 default_root = "/Users/openclaw/Code/worktrees"
 branch_prefix = "agent/"
+max_slots = 4
+slot_labels = ["A", "B", "C", "D"]
+worktree_name_template = "{repo}-{slug}"
 rule_1 = "one agent, one branch, one worktree"
 rule_2 = "agents do not commit to main"
 rule_3 = "operator reviews diffs before merge"

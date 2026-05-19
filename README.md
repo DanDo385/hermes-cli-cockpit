@@ -32,6 +32,7 @@ bin/cmux --no-attach
 bin/cctx
 bin/cockpit-workspaces list
 bin/cockpit-workspaces commands openclaw
+bin/cockpit-workspaces inventory agent-deck
 bin/hermes-health
 bin/ports
 bin/ports --registry config/ports.toml
@@ -122,6 +123,14 @@ See `docs/cmux-ai-assistant-workspace-design.md` for the north-star workspace re
 Important: official native cmux also installs a `cmux` CLI. This repo currently has a tmux-backed `bin/cmux` helper, so the long-term plan is to rename the repo helper before installing official cmux into PATH.
 
 `cctx` is the cwd-aware context router. It prints a workspace card for the current directory, writes `~/.cache/hermes-cli-cockpit/cctx.env`, and shows the exact `cmux --project=...` command for that context without rebuilding sessions or touching gateways. `cmux` rereads that state so status panes can repaint around the active context. The zsh hook is opt-in and can be disabled with `cctx-off`.
+
+Agent Deck live inventory is read-only:
+
+```bash
+bin/cockpit-workspaces inventory agent-deck
+```
+
+It reports agent-deck presence, isolated tmux socket status, git worktrees, and empty/filled agent slots. Creating a worktree remains an explicit operator command.
 
 When the training wheels get annoying, launch without guide panes:
 

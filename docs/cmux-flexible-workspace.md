@@ -94,10 +94,10 @@ The current `bin/cmux` implementation is still tmux-backed, but now uses the sam
 
 ```text
 0 hub       left rail + workspace overview + scratch
-1 editor    Neovim center surface + scratch + Kickstart guide
+1 editor    Neovim center surface + command runway + full-height learning rail
 2 project   cwd/project router + scratch
 3 browser   frontend/browser test surface + scratch
-4 agents    coding agents + Hermes/OpenClaw/agent-deck hints + scratch
+4 agents    live Agent Deck inventory + command card + empty worktree agent slots
 5 hermes    Hermes/OpenClaw bridge + scratch
 6 github    PR/discussion workflow + scratch
 7 obsidian  vault notes + scratch
@@ -233,7 +233,7 @@ Dan explicitly wanted scratch terminals where command lists appear.
 Implemented pattern:
 
 - hub has a bottom scratch terminal
-- editor has a right scratch terminal
+- editor has a command runway below Neovim and a full-height learning rail on the right
 - command-heavy pages have a right scratch terminal
 - scratch page has a free terminal grid
 
@@ -343,7 +343,7 @@ Do not hard-code surface IDs long-term. Native cmux automation should capture wo
 - Discord posts are dry-run-first
 - one agent, one branch, one worktree for parallel edits
 - Git diff/review gates before commits
-- OpenClaw remains sandbox/dev unless explicitly promoted
+- OpenClaw Ops prefers normal gateway status/run/start/install; dev/loopback is the lab fallback
 - mission-hermes / mission-openclaw remain operational control planes
 
 ## Missing input

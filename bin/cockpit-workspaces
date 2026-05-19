@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,6 +42,44 @@ def find_workspace(cfg: dict, ident: str) -> dict:
             return ws
     known = ", ".join(f"{w.get('number')}:{w.get('id')}" for w in workspaces(cfg))
     raise SystemExit(f"unknown workspace {ident!r}; known: {known}")
+
+
+def run_readonly(cmd: list[str]) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+    except FileNotFoundError:
+        return 127, f"missing command: {cmd[0]}"
+    except subprocess.TimeoutExpired:
+        return 124, f"timeout: {' '.join(cmd)}"
+    return proc.returncode, proc.stdout.strip()
+
+
+def parse_worktrees(output: str) -> list[dict]:
+    items = []
+    current = {}
+    for line in output.splitlines():
+        if not line:
+            if current:
+                items.append(current)
+                current = {}
+            continue
+        if " " in line:
+            key, value = line.split(" ", 1)
+        else:
+            key, value = line, ""
+        current[key] = value
+    if current:
+        items.append(current)
+    return items
+
+
+def git_dirty_count(path: str) -> str:
+    code, out = run_readonly(["git", "-C", path, "status", "--short"])
+    if code != 0:
+        return "unknown"
+    if not out:
+        return "clean"
+    return f"{len(out.splitlines())} changes"
 
 
 def cmux_available() -> str:
@@ -130,10 +169,104 @@ def cmd_commands(args: argparse.Namespace, cfg: dict) -> int:
         print(ws.get("lab_gateway_run"))
     if ws.get("id") == "agent-deck":
         policy = cfg.get("worktree_policy", {})
+        repo = str(topo.get("repo_path", ROOT))
+        root = str(policy.get("default_root", "/Users/openclaw/Code/worktrees"))
+        prefix = str(policy.get("branch_prefix", "agent/"))
+        template = str(policy.get("worktree_name_template", "{repo}-{slug}"))
+        repo_name = Path(repo).name
+        worktree_prefix = template.replace("{repo}", repo_name).replace("{slug}", "")
         print()
         print("# Worktree policy")
         for key in sorted(policy):
             print(f"#   {key}: {policy[key]}")
+        print()
+        print("# Read-only live inventory")
+        print("cockpit-workspaces inventory agent-deck")
+        print(f"git -C {sh_quote(repo)} worktree list --porcelain")
+        print("tmux -L agent-deck list-sessions -F '#{session_name} windows=#{session_windows} attached=#{session_attached}'")
+        print()
+        print("# Create one isolated agent worktree; edit slug before running")
+        print("slug=short-task-name")
+        print(f"branch={sh_quote(prefix)}\"$slug\"")
+        print(f"worktree={sh_quote(str(Path(root) / worktree_prefix))}\"$slug\"")
+        print(f"mkdir -p {sh_quote(root)}")
+        print(f'git -C {sh_quote(repo)} worktree add -b "$branch" "$worktree" main')
+        print('cd "$worktree"')
+        print()
+        print("# Launch exactly one agent in that worktree")
+        print("codex        # or: claude / opencode / hermes --worktree")
+        print()
+        print("# Review before merge")
+        print("git status --short --branch")
+        print("git diff --stat")
+        print("git diff --check")
+        print("git diff")
+        print()
+        print("# Optional agent-deck wrapper if already installed")
+        print("agent-deck")
+    return 0
+
+
+def cmd_inventory(args: argparse.Namespace, cfg: dict) -> int:
+    ws = find_workspace(cfg, args.workspace)
+    topo = cfg.get("topology", {})
+    policy = cfg.get("worktree_policy", {})
+    repo = str(topo.get("repo_path", ROOT))
+    root = str(policy.get("default_root", "/Users/openclaw/Code/worktrees"))
+    prefix = str(policy.get("branch_prefix", "agent/"))
+    max_slots = int(policy.get("max_slots", 4))
+    labels = list(policy.get("slot_labels", ["A", "B", "C", "D"]))
+
+    print(f"# {ws.get('title')} live inventory")
+    print("# Read-only: no sessions are created, no agents are launched, no worktrees are added.")
+    print()
+    print("Policy")
+    print(f"  repo:          {repo}")
+    print(f"  worktree root: {root}")
+    print(f"  branch prefix: {prefix}")
+    print(f"  rule:          {policy.get('rule_1', 'one agent, one branch, one worktree')}")
+    print()
+
+    print("Agent-deck")
+    ad = shutil.which("agent-deck")
+    print(f"  binary:        {ad or 'missing'}")
+    code, out = run_readonly(["tmux", "-L", "agent-deck", "list-sessions", "-F", "#{session_name} windows=#{session_windows} attached=#{session_attached}"])
+    if code == 0 and out:
+        for line in out.splitlines():
+            print(f"  tmux:          {line}")
+    else:
+        print("  tmux:          no agent-deck socket/session visible")
+    print()
+
+    print("Git worktrees")
+    code, out = run_readonly(["git", "-C", repo, "worktree", "list", "--porcelain"])
+    if code != 0:
+        print(f"  error:         {out}")
+        return 0
+
+    trees = parse_worktrees(out)
+    if not trees:
+        print("  none")
+    for tree in trees:
+        path = tree.get("worktree", "")
+        branch = tree.get("branch", "detached").replace("refs/heads/", "")
+        head = tree.get("HEAD", "")[:12]
+        dirty = git_dirty_count(path) if path else "unknown"
+        marker = "agent" if branch.startswith(prefix) else "base"
+        print(f"  {marker:<5} {branch:<32} {dirty:<12} {head} {path}")
+    print()
+
+    agent_trees = [t for t in trees if t.get("branch", "").replace("refs/heads/", "").startswith(prefix)]
+    print("Agent slots")
+    for index in range(max_slots):
+        label = labels[index] if index < len(labels) else str(index + 1)
+        if index < len(agent_trees):
+            tree = agent_trees[index]
+            path = tree.get("worktree", "")
+            branch = tree.get("branch", "").replace("refs/heads/", "")
+            print(f"  {label}: filled  branch={branch} path={path} status={git_dirty_count(path)}")
+        else:
+            print(f"  {label}: empty   create with branch {prefix}<slug> under {root}")
     return 0
 
 
@@ -166,6 +299,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands = sub.add_parser("commands", help="print operator commands for one workspace")
     commands.add_argument("workspace", help="workspace id, title, or number")
 
+    inventory = sub.add_parser("inventory", help="print read-only live inventory for one workspace")
+    inventory.add_argument("workspace", help="workspace id, title, or number")
+
     env = sub.add_parser("env", help="print shell exports for one workspace")
     env.add_argument("workspace", help="workspace id, title, or number")
     return parser
@@ -182,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_show(args, cfg)
     if command == "commands":
         return cmd_commands(args, cfg)
+    if command == "inventory":
+        return cmd_inventory(args, cfg)
     if command == "env":
         return cmd_env(args, cfg)
     parser.error(f"unknown command: {command}")

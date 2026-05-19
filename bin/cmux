@@ -114,7 +114,7 @@ Workspace model:
 
 Windows:
   0 hub       left rail + workspace overview + scratch terminal
-  1 editor    Neovim center surface using CMUX_NVIM_APPNAME, default nvim
+  1 editor    Neovim center surface + full-height learning rail using CMUX_NVIM_APPNAME, default nvim
   2 project   cwd/project router, ports, docs, and directory-aware commands
   3 browser   frontend test surface plus scratch terminal
   4 agents    coding agents, Hermes CLI, OpenClaw, agent-deck orchestration
@@ -260,13 +260,36 @@ new_editor_page() {
   tmux new-window -t "$SESSION:1" -n editor "$cmd"
   main="$(tmux list-panes -t "$SESSION:editor" -F '#{pane_id}' | head -1)"
   set_pane_title "$main" "Neovim editor - repo root"
-  scratch="$(tmux split-window -h -l 52 -t "$main" -P -F '#{pane_id}' "$(pane_cmd command-scratch editor)")"
-  set_pane_title "$scratch" "Scratch terminal - editor"
   if [[ "$GUIDE_MODE" != "off" ]]; then
-    guide="$(tmux split-window -v -l 13 -t "$scratch" -P -F '#{pane_id}' "$(pane_cmd editor-guide editor)")"
-    set_pane_title "$guide" "Neovim/Kickstart guide"
+    guide="$(tmux split-window -h -l 52 -t "$main" -P -F '#{pane_id}' "$(pane_cmd editor-guide editor)")"
+    set_pane_title "$guide" "Neovim learning rail"
   fi
+  scratch="$(tmux split-window -v -l 12 -t "$main" -P -F '#{pane_id}' "$(pane_cmd command-scratch editor)")"
+  set_pane_title "$scratch" "Command runway - editor"
   tmux select-pane -t "$main" >/dev/null
+}
+
+new_agents_page() {
+  local board commands slot_a slot_b guide
+  tmux new-window -t "$SESSION:4" -n agents "$(pane_cmd agents agents)"
+  board="$(tmux list-panes -t "$SESSION:agents" -F '#{pane_id}' | head -1)"
+  set_pane_title "$board" "Agent Deck board - live inventory"
+
+  commands="$(tmux split-window -h -l 58 -t "$board" -P -F '#{pane_id}' "$(pane_cmd command-scratch agents)")"
+  set_pane_title "$commands" "Agent commands - copy/edit/run"
+
+  slot_a="$(tmux split-window -v -p 38 -t "$board" -P -F '#{pane_id}' "$(pane_cmd scratch agent-slot-a)")"
+  set_pane_title "$slot_a" "Agent slot A - assign worktree first"
+
+  slot_b="$(tmux split-window -v -p 38 -t "$commands" -P -F '#{pane_id}' "$(pane_cmd scratch agent-slot-b)")"
+  set_pane_title "$slot_b" "Agent slot B - assign worktree first"
+
+  if [[ "$GUIDE_MODE" != "off" ]]; then
+    guide="$(tmux split-window -v -l 9 -t "$slot_a" -P -F '#{pane_id}' "$(pane_cmd guide agents)")"
+    set_pane_title "$guide" "Agent Deck shortcuts"
+  fi
+
+  tmux select-pane -t "$board" >/dev/null
 }
 
 new_scratch_page() {
@@ -290,7 +313,7 @@ build_session() {
   new_editor_page
   new_page 2 project project "Project/CWD router"
   new_page 3 browser browser "Browser testing surface"
-  new_page 4 agents agents "CLI coding agents + orchestration"
+  new_agents_page
   new_page 5 hermes hermes "Hermes/OpenClaw session bridge"
   new_page 6 github github "GitHub PRs + architecture discussion"
   new_page 7 obsidian obsidian "Obsidian vault + project notes"

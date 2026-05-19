@@ -174,12 +174,20 @@ GUIDE
 
 show_editor_guide() {
   cat <<EDITOR
-NEOVIM / KICKSTART GUIDE
+NEOVIM LEARNING RAIL
   Active appname:  $NVIM_APPNAME_VALUE
   Config path:     $HOME/.config/$NVIM_APPNAME_VALUE/init.lua
   Repo root:       $REPO_DIR
 
-Neovim keyboard survival kit:
+VS-Code-like mental map:
+  Explorer      :Ex / :Explore / :Oil / :Neotree
+  Quick open    :Telescope find_files
+  Search        :Telescope live_grep or /text
+  Problems      diagnostics + quickfix, :copen
+  Terminal      tmux command runway below editor
+  Source control git diff/status in scratch or Neogit
+
+Neovim survival:
   i             insert mode
   Esc           normal mode
   :w            save
@@ -189,44 +197,67 @@ Neovim keyboard survival kit:
   /text Enter   search forward
   n / N         next / previous search result
   :e file       open file
-  :Ex           file explorer
   Ctrl-w h/j/k/l move between Neovim splits
-  :checktime    reload files changed by agents
+
+File tree choices:
+  Built-in      :Ex or :Explore
+  Fuzzy files   :Telescope find_files
+  Text search   :Telescope live_grep
+  Oil.nvim      :Oil             if installed
+  Neo-tree      :Neotree         if installed
+  nvim-tree     :NvimTreeToggle  if installed
+
+Themes:
+  :colorscheme <Tab>    list installed themes
+  :colorscheme habamax  built-in fallback
+  :set background=dark  or light
+  Kickstart: edit init.lua, restart, then :checkhealth
+
+LSP / code intelligence:
+  :Mason                installer/status if installed
+  :LspInfo              attached language servers
+  :checkhealth vim.lsp  LSP health
+  gd                    go to definition
+  gr                    references
+  K                     hover docs
+  <leader>rn            rename
+  <leader>ca            code action
+  [d / ]d               prev / next diagnostic
+
+Compilers, tests, quickfix:
+  :make                 run current makeprg
+  :compiler <Tab>       discover compiler presets
+  :copen                open quickfix/problems
+  :cnext / :cprev       walk failures
+  :grep pattern **/*    populate quickfix from grep
+  Run repo tests in the command runway, not in guide.
+
+Solidity / Foundry scratch commands:
+  forge build
+  forge test -vvv
+  forge fmt --check
+  forge coverage
+  cast --help
+  anvil                 scratch-only local chain; Ctrl-c stops
 
 tmux around Neovim:
   Ctrl-b arrows move to scratch/guide panes
-  Ctrl-b z      zoom Neovim full-screen, then unzoom
+  Ctrl-b z      zoom Neovim or this rail
   Ctrl-b d      detach without quitting Neovim
-
-Practice loop:
-  1. Open README.md with :e README.md
-  2. Search /cmux
-  3. Save with :w
-  4. Move to scratch with Ctrl-b arrow and run git diff --stat
-
-Kickstart mental model:
-  Kickstart is not a full distribution. It is a readable launch point for your own config.
-  Lazy.nvim manages plugins; init.lua is meant to be read and modified.
-  Nerd Font support matters for icons and statusline glyphs.
-
-Center-surface contract:
-  Neovim owns active editing.
-  Hermes/OpenClaw/Codex/Claude/OpenCode patch files externally.
-  Git diff is the truth layer between humans and agents.
 
 Agent-edit safety:
   :set autoread?
-  :checktime
+  :checktime            reload files changed by agents
+  Run :checktime before saving after agent edits.
+  If warned, inspect git diff before :edit!.
+  Never let two agents patch the same file blindly.
+  Git diff is the truth layer between human and agents.
 
-Useful later upgrades:
-  Telescope/fzf-lua for file and symbol search.
-  LSP + diagnostics for code intelligence.
-  Trouble/quickfix for test failures.
-  Neogit/lazygit for review ergonomics.
-
-Clean Kickstart sandbox:
-  git clone https://github.com/nvim-lua/kickstart.nvim ~/.config/nvim-kickstart
-  CMUX_NVIM_APPNAME=nvim-kickstart cmux --reset
+Practice loop:
+  1. Open README.md with :e README.md
+  2. Open tree/search with :Ex or :Telescope find_files
+  3. Move to scratch and run git diff --stat
+  4. Let an agent edit, then return and run :checktime
 EDITOR
 }
 
@@ -463,6 +494,15 @@ show_agents() {
   present agent-deck
   present git
   present tmux
+  printf '
+Live Agent Deck inventory
+'
+  if [[ -x "$COCKPIT_BIN_DIR/cockpit-workspaces" ]]; then
+    "$COCKPIT_BIN_DIR/cockpit-workspaces" inventory agent-deck 2>&1 | sed 's/^/  /'
+  else
+    printf '  cockpit-workspaces missing: %s/cockpit-workspaces
+' "$COCKPIT_BIN_DIR"
+  fi
   cat <<'AGENTS'
 
 Agent-deck research takeaways
@@ -484,12 +524,24 @@ Recommended use
   agent-deck orchestration dashboard if installed later
 
 Launch patterns
-  codex
-  claude
-  opencode
-  hermes --worktree
-  agent-deck
-  agent-deck add . -c claude --worktree feature/a --new-branch
+  cockpit-workspaces inventory agent-deck
+  cockpit-workspaces commands agent-deck
+
+  # One agent, one branch, one worktree:
+  slug=short-task-name
+  branch="agent/$slug"
+  worktree="/Users/openclaw/Code/worktrees/$(basename "$PWD")-$slug"
+  mkdir -p "/Users/openclaw/Code/worktrees"
+  git worktree add -b "$branch" "$worktree" main
+  cd "$worktree"
+
+  # Launch exactly one agent in that worktree:
+  codex        # or: claude / opencode / hermes --worktree
+
+  # Review before merge:
+  git status --short --branch
+  git diff --stat
+  git diff --check
 
 Safety model
   1. Inspect diff before delegating.
@@ -660,9 +712,27 @@ CMDS
     editor)
       cat <<CMDS
 cd "$REPO_DIR"
-nvim README.md docs/cmux.md docs/architecture.md
-nvim +':checktime'
+git status --short --branch
 git diff --stat
+git diff --check
+nvim .
+nvim +':set autoread?' +':checktime' .
+
+# Type inside Neovim:
+#   :Ex
+#   :Telescope find_files
+#   :Telescope live_grep
+#   :Mason
+#   :LspInfo
+#   :copen
+#   :checktime
+
+# Generic build/test probes:
+[ -f package.json ] && npm test
+[ -f package.json ] && npm run build
+[ -f foundry.toml ] && forge build
+[ -f foundry.toml ] && forge test -vvv
+[ -f foundry.toml ] && forge fmt --check
 CMDS
       ;;
     project)
@@ -687,11 +757,18 @@ CMDS
     agents)
       cat <<CMDS
 cd "$REPO_DIR"
-codex
-claude
-opencode
-hermes --worktree
-agent-deck
+cockpit-workspaces inventory agent-deck
+cockpit-workspaces commands agent-deck
+slug=short-task-name
+branch="agent/\$slug"
+worktree="/Users/openclaw/Code/worktrees/$(basename "$REPO_DIR")-\$slug"
+mkdir -p "/Users/openclaw/Code/worktrees"
+git worktree add -b "\$branch" "\$worktree" main
+cd "\$worktree"
+codex        # or: claude / opencode / hermes --worktree
+git status --short --branch
+git diff --stat
+git diff --check
 CMDS
       ;;
     hermes)
