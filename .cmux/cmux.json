@@ -4,27 +4,27 @@
     {
       "name": "Hermes Ops Cockpit",
       "description": "iMac native cmux workspace for MBP Hermes runtime monitoring via SSH/tmux plus local vault/docs surfaces.",
-      "command": "ssh openclaw@100.95.209.3 'tmux attach -t mission-hermes || tmux new -s mission-hermes'"
+      "command": "ssh mbp-runtime 'tmux attach -t mission-hermes || tmux new -s mission-hermes'"
     },
     {
       "name": "OpenClaw Ops Cockpit",
       "description": "iMac native cmux workspace for MBP OpenClaw runtime monitoring via SSH/tmux plus local project/browser surfaces.",
-      "command": "ssh openclaw@100.95.209.3 'tmux attach -t mission-openclaw || tmux new -s mission-openclaw'"
+      "command": "ssh mbp-runtime 'tmux attach -t mission-openclaw || tmux new -s mission-openclaw'"
     },
     {
       "name": "Code Workbench",
       "description": "Open the Hermes CLI cockpit repo with repo-aware commands; add native browser/file/vault panes from cmux UI.",
-      "command": "cd /Users/openclaw/Code/hermes-cli-cockpit && pwd && git status --short --branch && bin/cockpit-workspaces list && echo 'Use cmux split/browser/file panels from here.'"
+      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && pwd && git status --short --branch && bin/cockpit-workspaces list && echo 'Use cmux split/browser/file panels from here.'"
     },
     {
       "name": "Agent Deck",
       "description": "Agent/worktree inventory for orchestration; starts read-only until agent-deck is installed.",
-      "command": "cd /Users/openclaw/Code/hermes-cli-cockpit && bin/cockpit-workspaces inventory agent-deck && echo 'Next: create worktrees and launch Codex/Claude/OpenCode in native cmux surfaces.'"
+      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/cockpit-workspaces inventory agent-deck && echo 'Next: create worktrees and launch Codex/Claude/OpenCode in native cmux surfaces.'"
     },
     {
       "name": "Obsidian Vault",
       "description": "Open canonical Hermes workspace/vault path from a native cmux terminal surface.",
-      "command": "cd /Users/openclaw/.hermes/workspace && pwd && printf 'Vault root ready. Open Finder/file panel/browser/Obsidian surface from cmux.\\n'"
+      "command": "cd \"$HOME/.hermes/workspace\" && pwd && printf 'Vault root ready. Open Finder/file panel/browser/Obsidian surface from cmux.\\n'"
     }
   ],
   "actions": {
@@ -32,7 +32,7 @@
       "type": "command",
       "title": "Hermes Ops",
       "subtitle": "SSH to MBP mission-hermes tmux runtime",
-      "command": "ssh openclaw@100.95.209.3 'tmux attach -t mission-hermes || tmux new -s mission-hermes'",
+      "command": "ssh mbp-runtime 'tmux attach -t mission-hermes || tmux new -s mission-hermes'",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["hermes", "mbp", "gateway", "runtime", "tmux"]
@@ -41,7 +41,7 @@
       "type": "command",
       "title": "OpenClaw Ops",
       "subtitle": "SSH to MBP mission-openclaw tmux runtime",
-      "command": "ssh openclaw@100.95.209.3 'tmux attach -t mission-openclaw || tmux new -s mission-openclaw'",
+      "command": "ssh mbp-runtime 'tmux attach -t mission-openclaw || tmux new -s mission-openclaw'",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["openclaw", "mbp", "gateway", "runtime", "tmux"]
@@ -50,7 +50,7 @@
       "type": "command",
       "title": "Workspace Cards",
       "subtitle": "Show Hermes/OpenClaw/Code/Agent cockpit cards",
-      "command": "cd /Users/openclaw/Code/hermes-cli-cockpit && bin/cockpit-workspaces list",
+      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/cockpit-workspaces list",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["cards", "workspace", "cockpit"]
@@ -59,7 +59,7 @@
       "type": "command",
       "title": "Vault Root",
       "subtitle": "Open canonical Hermes workspace path",
-      "command": "cd /Users/openclaw/.hermes/workspace && pwd",
+      "command": "cd \"$HOME/.hermes/workspace\" && pwd",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["obsidian", "vault", "notes"]

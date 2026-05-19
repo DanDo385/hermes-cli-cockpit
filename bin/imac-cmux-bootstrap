@@ -28,7 +28,7 @@ EOF
 MODE="${1:---check}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CMUX_CONFIG="$REPO_ROOT/.cmux/cmux.json"
-MBP_SSH_TARGET="${MBP_SSH_TARGET:-openclaw@100.95.209.3}"
+MBP_SSH_TARGET="${MBP_SSH_TARGET:-mbp-runtime}"
 
 host_name() { hostname 2>/dev/null || scutil --get ComputerName 2>/dev/null || echo unknown; }
 macos_major() { sw_vers -productVersion | awk -F. '{print $1}'; }

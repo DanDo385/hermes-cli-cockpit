@@ -11,13 +11,13 @@ This repo is being extracted from Dan's private MBP/iMac Hermes workflow into a 
 Private Obsidian master page:
 
 ```text
-/Users/openclaw/.hermes/workspace/projects/hermes-cli-cockpit/cli-mission-control-master-page.md
+$HOME/.hermes/workspace/projects/hermes-cli-cockpit/cli-mission-control-master-page.md
 ```
 
 Research links:
 
 ```text
-/Users/openclaw/.hermes/workspace/resources/links/2026-05-09-cli-cockpit-research-links.md
+$HOME/.hermes/workspace/resources/links/2026-05-09-cli-cockpit-research-links.md
 ```
 
 Keep this public repo sanitized. Do not copy private hostnames, secrets, account details, or raw logs into public docs.
@@ -117,7 +117,7 @@ docs/imac-native-cmux-workspaces.md
 Run from the iMac:
 
 ```bash
-cd /Users/openclaw/Code/hermes-cli-cockpit
+cd "$HOME/Code/hermes-cli-cockpit"
 bin/imac-cmux-bootstrap --check
 bin/imac-cmux-bootstrap --install
 bin/imac-cmux-bootstrap --reload-config
