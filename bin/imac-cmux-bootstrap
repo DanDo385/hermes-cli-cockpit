@@ -92,7 +92,14 @@ check_all() {
   echo "== cmux binary =="
   if cbin="$(cmux_bin)"; then
     echo "Found: $cbin"
-    "$cbin" --version 2>&1 || true
+    app_root=""
+    case "$cbin" in
+      */cmux.app/Contents/MacOS/cmux) app_root="${cbin%/Contents/MacOS/cmux}" ;;
+    esac
+    if [ -n "$app_root" ] && [ -f "$app_root/Contents/Info.plist" ]; then
+      /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_root/Contents/Info.plist" 2>/dev/null | sed 's/^/Version: /' || true
+      /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app_root/Contents/Info.plist" 2>/dev/null | sed 's/^/Minimum macOS: /' || true
+    fi
   else
     echo "Missing: native cmux"
   fi
@@ -143,7 +150,7 @@ launch_cmux() {
   if [ -d /Applications/cmux.app ]; then
     open -a /Applications/cmux.app
   elif [ -d "$HOME/Applications/cmux.app" ]; then
-    open -a "$HOME/Applications/cmux.app"
+    open "$HOME/Applications/cmux.app"
   else
     cbin="$(cmux_bin)"
     open "$cbin"
