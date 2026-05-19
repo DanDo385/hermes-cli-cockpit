@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+imac-cmux-bootstrap: prepare native cmux cockpit on the iMac
+
+Run this on the iMac, not the MBP.
+
+Usage:
+  bin/imac-cmux-bootstrap --check
+  bin/imac-cmux-bootstrap --install
+  bin/imac-cmux-bootstrap --reload-config
+  bin/imac-cmux-bootstrap --launch
+
+What it does:
+  --check          Verify host, macOS, Ghostty config, cmux install, and MBP SSH reachability.
+  --install        Install native cmux via Homebrew cask if missing. Does not touch MBP tmux.
+  --reload-config  Run cmux reload-config after .cmux/cmux.json changes.
+  --launch         Open native cmux on the iMac.
+
+Topology:
+  iMac = native cmux visual cockpit
+  MBP  = tmux runtime host reached via SSH/Tailscale
+EOF
+}
+
+MODE="${1:---check}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+CMUX_CONFIG="$REPO_ROOT/.cmux/cmux.json"
+MBP_SSH_TARGET="${MBP_SSH_TARGET:-openclaw@100.84.204.2}"
+
+host_name() { hostname 2>/dev/null || scutil --get ComputerName 2>/dev/null || echo unknown; }
+macos_major() { sw_vers -productVersion | awk -F. '{print $1}'; }
+
+ensure_imac_context() {
+  local h
+  h="$(host_name)"
+  case "$h" in
+    *iMac*|*imac*|control-imac*) return 0 ;;
+  esac
+  cat >&2 <<EOF
+Refusing native cmux setup on this host: $h
+
+Native cmux belongs on the iMac. The MBP should keep tmux-only runtime pages.
+If this is actually the iMac with a non-obvious hostname, rerun with:
+
+  ALLOW_NON_IMAC_HOST=1 $0 $MODE
+EOF
+  if [ "${ALLOW_NON_IMAC_HOST:-0}" != "1" ]; then
+    exit 64
+  fi
+}
+
+cmux_bin() {
+  if command -v cmux >/dev/null 2>&1; then
+    command -v cmux
+    return 0
+  fi
+  for p in /Applications/cmux.app/Contents/MacOS/cmux "$HOME/Applications/cmux.app/Contents/MacOS/cmux"; do
+    [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
+  return 1
+}
+
+check_all() {
+  echo "== host =="
+  host_name
+  sw_vers
+  uname -m
+
+  echo
+  echo "== target discipline =="
+  ensure_imac_context
+  echo "OK: iMac context accepted"
+
+  echo
+  echo "== cmux config =="
+  test -f "$CMUX_CONFIG"
+  python3 -m json.tool "$CMUX_CONFIG" >/dev/null
+  echo "OK: $CMUX_CONFIG"
+
+  echo
+  echo "== Ghostty config =="
+  if [ -f "$HOME/.config/ghostty/config" ]; then
+    echo "Found: $HOME/.config/ghostty/config"
+  else
+    echo "Missing: $HOME/.config/ghostty/config (cmux will use defaults)"
+  fi
+
+  echo
+  echo "== cmux binary =="
+  if cbin="$(cmux_bin)"; then
+    echo "Found: $cbin"
+    "$cbin" --version 2>&1 || true
+  else
+    echo "Missing: native cmux"
+  fi
+
+  echo
+  echo "== MBP SSH reachability =="
+  if ssh -o BatchMode=yes -o ConnectTimeout=6 -o ConnectionAttempts=1 "$MBP_SSH_TARGET" 'hostname; tmux list-sessions 2>/dev/null || true'; then
+    echo "OK: MBP SSH target reachable: $MBP_SSH_TARGET"
+  else
+    cat >&2 <<EOF
+BLOCKED: iMac cannot SSH non-interactively to MBP target: $MBP_SSH_TARGET
+Fix SSH trust before using Hermes/OpenClaw ops actions.
+EOF
+    return 3
+  fi
+}
+
+install_cmux() {
+  ensure_imac_context
+  if cmux_bin >/dev/null 2>&1; then
+    echo "cmux already installed: $(cmux_bin)"
+    return 0
+  fi
+  if ! command -v brew >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+Homebrew is missing. Manual install option:
+  1. Download https://github.com/manaflow-ai/cmux/releases/latest/download/cmux-macos.dmg
+  2. Drag cmux.app to /Applications
+  3. Symlink CLI if needed:
+     ln -s /Applications/cmux.app/Contents/MacOS/cmux /usr/local/bin/cmux
+EOF
+    exit 69
+  fi
+  brew tap manaflow-ai/cmux
+  brew install --cask cmux
+  cmux_bin
+}
+
+reload_config() {
+  ensure_imac_context
+  cbin="$(cmux_bin)"
+  python3 -m json.tool "$CMUX_CONFIG" >/dev/null
+  "$cbin" reload-config
+}
+
+launch_cmux() {
+  ensure_imac_context
+  if [ -d /Applications/cmux.app ]; then
+    open -a /Applications/cmux.app
+  elif [ -d "$HOME/Applications/cmux.app" ]; then
+    open -a "$HOME/Applications/cmux.app"
+  else
+    cbin="$(cmux_bin)"
+    open "$cbin"
+  fi
+}
+
+case "$MODE" in
+  --help|-h) usage ;;
+  --check) check_all ;;
+  --install) install_cmux ;;
+  --reload-config) reload_config ;;
+  --launch) launch_cmux ;;
+  *) usage >&2; exit 64 ;;
+esac

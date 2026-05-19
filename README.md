@@ -24,11 +24,19 @@ Keep this public repo sanitized. Do not copy private hostnames, secrets, account
 
 ## First commands
 
+Native cmux cockpit work belongs on the iMac. MBP tmux runtime pages now live separately in `hermes-tmux-workspaces`.
+
 ```bash
+# iMac native cmux path
+bin/imac-cmux-bootstrap --check
+bin/imac-cmux-bootstrap --install
+bin/imac-cmux-bootstrap --reload-config
+bin/imac-cmux-bootstrap --launch
+
+# MBP/runtime helper probes kept here until the split is fully published
 bin/mission --no-attach
 bin/mission-hermes --no-attach
 bin/mission-openclaw --no-attach
-bin/cmux --no-attach
 bin/cctx
 bin/cockpit-workspaces list
 bin/cockpit-workspaces commands openclaw
@@ -45,7 +53,7 @@ Installed commands during local development:
 mission                 # legacy/current Hermes cockpit: mission-control
 mission-hermes          # mirrored Hermes cockpit: mission-hermes
 mission-openclaw        # mirrored OpenClaw cockpit: mission-openclaw
-cmux                    # tmux-backed coding/review/test/discussion workbench helper, to be renamed before official cmux owns PATH
+cmux                    # upstream native cmux on the iMac only; do not point this name at MBP tmux helpers
 cctx                    # cwd/project/session context card for cmux
 cockpit-workspaces      # read-only iMac cmux -> MBP tmux workspace cards
 mission-web-hermes      # static Hermes mission page, default port 4173
@@ -55,7 +63,7 @@ ports
 port-who 3000
 ```
 
-- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cmux`, `~/.local/bin/cctx`, `~/.local/bin/cockpit-workspaces`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`.
+- `~/.local/bin/mission`, `~/.local/bin/mission-hermes`, `~/.local/bin/mission-openclaw`, `~/.local/bin/cctx`, `~/.local/bin/cockpit-workspaces`, `~/.local/bin/mission-web-hermes`, `~/.local/bin/mission-web-openclaw`, `~/.local/bin/ports`, and `~/.local/bin/port-who` should symlink to `~/Code/hermes-cli-cockpit/bin/*`. Do not symlink `~/.local/bin/cmux` on the MBP; reserve `cmux` for upstream native cmux on the iMac.
 - `config/ports.toml` is the local active port registry. `config/ports.example.toml` is a copyable template.
 - `ports` classifications: `REGISTERED` active known listener, `UNKNOWN` active unregistered listener, `EXPECTED_DOWN` registered port not listening, `CONFLICT` duplicate service claims.
 
@@ -87,40 +95,39 @@ OpenClaw lab gateway:  19001
 OpenClaw browser ctrl: 19003
 ```
 
-## CMUX workbench
+## Native cmux cockpit
 
-`cmux` is the code/edit/review/test/discussion layer that references the live mission sessions without replacing them.
+Native cmux is the iMac visual cockpit layer. It is not the MBP tmux monitor.
 
 ```text
-mission-hermes      Hermes operations/control plane
-mission-openclaw    OpenClaw operations/control plane; normal gateway capable, dev/lab mode for debugging
-cmux                repo editing, review, browser testing, PRs, Obsidian, Discord discussions
+mission-hermes      MBP tmux runtime monitor for Hermes operations
+mission-openclaw    MBP tmux runtime monitor for OpenClaw operations
+native cmux         iMac browser/file/vault/editor/agent cockpit
 cockpit-workspaces  read-only cards for the iMac native-cmux -> MBP remote-tmux layout
 ```
 
-The current implementation is a tmux-backed flexible workspace deck inspired by native cmux:
+The historical tmux-backed workbench has been split into `hermes-tmux-workspaces`. This repo now carries iMac native cmux scaffolding:
 
 ```text
-left rail       project/session cards
-center          active surface: editor, agent, browser, PR, vault, API
-right/bottom    contextual scratch terminals near command lists
-ops bridge      Hermes/OpenClaw mission sessions remain reachable
+.cmux/cmux.json              project-local native cmux actions/commands
+bin/imac-cmux-bootstrap      iMac-only install/check/reload/launch helper
+docs/imac-native-cmux-workspaces.md
 ```
 
-Run:
+Run from the iMac:
 
 ```bash
-cmux --reset
-cmux --two-sessions --reset
-cmux --project=/path/to/repo --reset
-cctx /path/to/repo
-source /Users/openclaw/Code/hermes-cli-cockpit/bin/cctx-hook.zsh
-cctx-on
+cd /Users/openclaw/Code/hermes-cli-cockpit
+bin/imac-cmux-bootstrap --check
+bin/imac-cmux-bootstrap --install
+bin/imac-cmux-bootstrap --reload-config
+bin/imac-cmux-bootstrap --launch
 ```
 
+Until iMac SSH is authorized, MBP-side tooling can only prepare files and docs. It cannot launch or verify native cmux on the iMac.
 See `docs/cmux-ai-assistant-workspace-design.md` for the north-star workspace recommendations across Hermes/OpenClaw ops, coding workbench, and agent-deck/community orchestration. See `docs/cmux.md` for the operational map, `docs/cmux-flexible-workspace.md` for the deeper design/research notes covering the screenshot, native cmux, Kickstart Neovim, and agent-deck, and `docs/remote-ai-cockpit-plan.md` for the local cmux + remote tmux + Tailscale implementation plan.
 
-Important: official native cmux also installs a `cmux` CLI. This repo currently has a tmux-backed `bin/cmux` helper, so the long-term plan is to rename the repo helper before installing official cmux into PATH.
+Important: official native cmux owns the `cmux` CLI name on the iMac. Do not put this repo's historical tmux-backed `bin/cmux` on PATH; keep MBP tmux helpers under explicit names like `cockpit-workbench`, `mbp-cockpit-tmux`, or the split `hermes-tmux-workspaces` repo.
 
 `cctx` is the cwd-aware context router. It prints a workspace card for the current directory, writes `~/.cache/hermes-cli-cockpit/cctx.env`, and shows the exact `cmux --project=...` command for that context without rebuilding sessions or touching gateways. `cmux` rereads that state so status panes can repaint around the active context. The zsh hook is opt-in and can be disabled with `cctx-off`.
 
