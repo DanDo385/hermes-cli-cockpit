@@ -131,6 +131,12 @@ def git_dirty_count(path: str) -> str:
 def cmux_available() -> str:
     path = shutil.which("cmux")
     if not path:
+        for app_path in [
+            Path("/Applications/cmux.app/Contents/MacOS/cmux"),
+            Path.home() / "Applications" / "cmux.app" / "Contents" / "MacOS" / "cmux",
+        ]:
+            if app_path.exists():
+                return str(app_path)
         return "missing"
     # The repo helper historically shadows official cmux. Flag that clearly.
     try:
