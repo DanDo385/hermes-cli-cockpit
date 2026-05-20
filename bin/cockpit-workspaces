@@ -22,13 +22,59 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "cockpit-workspaces.toml"
 
 
-def load_config(path: Path) -> dict:
-    if tomllib is None:
-        raise SystemExit("cockpit-workspaces: Python 3.11+ tomllib is required")
+def _simple_toml_value(raw: str) -> object:
+    """Parse the small TOML subset used by cockpit-workspaces.toml.
+
+    This fallback exists for iMac system Python builds older than 3.11, where
+    stdlib tomllib is unavailable. It intentionally supports only the registry
+    shape we own here: quoted strings, integers, and arrays of quoted strings.
+    """
+    raw = raw.strip()
+    if raw.startswith('"') and raw.endswith('"'):
+        return raw[1:-1]
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        return [_simple_toml_value(part.strip()) for part in inner.split(",")]
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+def _simple_toml_loads(text: str) -> dict:
+    """Minimal parser for this repo's owned cockpit workspace registry."""
+    cfg: dict = {}
+    current: dict | None = None
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "[[workspace]]":
+            current = {}
+            cfg.setdefault("workspace", []).append(current)
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+            current = cfg.setdefault(section, {})
+            continue
+        if "=" not in stripped or current is None:
+            continue
+        key, value = stripped.split("=", 1)
+        current[key.strip()] = _simple_toml_value(value)
+    return cfg
+
+
+def load_config(path: Path) -> dict:
+    try:
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         raise SystemExit(f"cockpit-workspaces: config not found: {path}")
+    if tomllib is not None:
+        return tomllib.loads(text)
+    return _simple_toml_loads(text)
 
 
 def workspaces(cfg: dict) -> list[dict]:
