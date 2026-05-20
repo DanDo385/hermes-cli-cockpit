@@ -41,6 +41,10 @@ bin/cctx
 bin/cockpit-workspaces list
 bin/cockpit-workspaces commands openclaw
 bin/cockpit-workspaces inventory agent-deck
+bin/agent-worktree list
+bin/agent-worktree create --slug fix-login-flow --agent codex --no-launch
+bin/a2a-bridge agent-card | python3 -m json.tool
+bin/browser-smoke --directory web --path /hermes/ --expect 'Hermes Mission Control' --path /openclaw/ --expect 'OpenClaw Mission Control'
 bin/hermes-health
 bin/ports
 bin/ports --registry config/ports.toml
@@ -56,6 +60,9 @@ mission-openclaw        # mirrored OpenClaw cockpit: mission-openclaw
 cmux                    # upstream native cmux on the iMac only; do not point this name at MBP tmux helpers
 cctx                    # cwd/project/session context card for cmux
 cockpit-workspaces      # read-only iMac cmux -> MBP tmux workspace cards
+agent-worktree          # one-agent/one-branch/one-worktree slot manager
+a2a-bridge              # local Agent Card + JSON-RPC stdio bridge
+browser-smoke           # local HTTP front-end/cockpit smoke checker
 mission-web-hermes      # static Hermes mission page, default port 4173
 mission-web-openclaw    # static OpenClaw mission page, default port 4174
 hermes-health

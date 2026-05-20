@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Worktree-backed agent slot manager for the cmux/tmux cockpit.
+
+Default posture: inspect first, launch never unless explicitly requested later.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+BRANCH_PREFIX = "agent/"
+MAX_SLOTS = 4
+SLOT_LABELS = ["A", "B", "C", "D"]
+
+
+def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True, check=check)
+
+
+def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return run(["git", "-C", str(repo), *args], check=check)
+
+
+def git_error_message(exc: subprocess.CalledProcessError) -> str:
+    cmd = " ".join(str(part) for part in exc.cmd) if isinstance(exc.cmd, list) else str(exc.cmd)
+    detail = (exc.stderr or exc.stdout or "").strip()
+    message = f"git failed ({exc.returncode}): {cmd}"
+    if detail:
+        message += f"\n{detail}"
+    return message
+
+
+def repo_name(repo: Path) -> str:
+    try:
+        top = git(repo, "rev-parse", "--show-toplevel").stdout.strip()
+        return Path(top).name
+    except Exception:
+        return repo.name
+
+
+def default_repo() -> Path:
+    env = os.environ.get("CMUX_REPO_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def sanitize_slug(slug: str) -> str:
+    slug = slug.strip().lower()
+    slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-._")
+    if not slug:
+        raise SystemExit("Slug becomes empty after sanitization.")
+    if slug in {"main", "master", "head"}:
+        raise SystemExit(f"Refusing unsafe slug: {slug}")
+    return slug
+
+
+def current_branch(repo: Path) -> str:
+    cp = git(repo, "branch", "--show-current", check=False)
+    branch = cp.stdout.strip()
+    return branch or "HEAD"
+
+
+def worktree_rows(repo: Path) -> list[dict[str, str | bool]]:
+    cp = git(repo, "worktree", "list", "--porcelain")
+    rows: list[dict[str, str | bool]] = []
+    row: dict[str, str | bool] = {}
+    for line in cp.stdout.splitlines() + [""]:
+        if not line:
+            if row:
+                rows.append(row)
+                row = {}
+            continue
+        if line.startswith("worktree "):
+            row["path"] = line.split(" ", 1)[1]
+        elif line.startswith("HEAD "):
+            row["head"] = line.split(" ", 1)[1]
+        elif line.startswith("branch "):
+            row["branch"] = line.split(" ", 1)[1].removeprefix("refs/heads/")
+        elif line == "bare":
+            row["bare"] = True
+        elif line == "detached":
+            row["detached"] = True
+    return rows
+
+
+def status_for(path: Path) -> str:
+    cp = run(["git", "-C", str(path), "status", "--short"], check=False)
+    if cp.returncode != 0:
+        return "unknown"
+    return "dirty" if cp.stdout.strip() else "clean"
+
+
+def inventory(repo: Path, root: Path) -> dict:
+    repo = repo.resolve()
+    root = root.expanduser().resolve()
+    rows = []
+    for row in worktree_rows(repo):
+        path = Path(str(row.get("path", "")))
+        branch = str(row.get("branch", "detached"))
+        kind = "agent" if branch.startswith(BRANCH_PREFIX) else "base"
+        rows.append(
+            {
+                "kind": kind,
+                "branch": branch,
+                "path": str(path),
+                "head": str(row.get("head", ""))[:12],
+                "status": status_for(path) if path.exists() else "missing",
+            }
+        )
+    agent_rows = [r for r in rows if r["kind"] == "agent"]
+    slots = []
+    for idx, label in enumerate(SLOT_LABELS):
+        slots.append({"slot": label, "state": "occupied" if idx < len(agent_rows) else "empty", "worktree": agent_rows[idx] if idx < len(agent_rows) else None})
+    return {
+        "policy": {
+            "repo": str(repo),
+            "worktree_root": str(root),
+            "branch_prefix": BRANCH_PREFIX,
+            "one_agent_per_worktree": True,
+            "max_slots": MAX_SLOTS,
+            "launch_default": "manual",
+        },
+        "worktrees": rows,
+        "slots": slots,
+    }
+
+
+def print_inventory(inv: dict) -> None:
+    print("Agent worktree slots")
+    print("====================")
+    pol = inv["policy"]
+    print(f"repo          {pol['repo']}")
+    print(f"worktree root {pol['worktree_root']}")
+    print(f"policy        one agent, one branch, one worktree")
+    print("")
+    print("Git worktrees")
+    for row in inv["worktrees"]:
+        print(f"  {row['kind']:<5} {row['branch']:<32} {row['status']:<7} {row['head']:<12} {row['path']}")
+    print("")
+    print("Agent slots")
+    for slot in inv["slots"]:
+        if slot["state"] == "empty":
+            print(f"  {slot['slot']}: empty")
+        else:
+            wt = slot["worktree"]
+            print(f"  {slot['slot']}: {wt['branch']} {wt['status']} {wt['path']}")
+
+
+def create(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).expanduser().resolve()
+    root = Path(args.root).expanduser().resolve()
+    slug = sanitize_slug(args.slug)
+    branch = f"{BRANCH_PREFIX}{slug}"
+    worktree = root / f"{repo_name(repo)}-{slug}"
+    inv = inventory(repo, root)
+    agents = [r for r in inv["worktrees"] if r["kind"] == "agent"]
+    if len(agents) >= MAX_SLOTS:
+        raise SystemExit(f"Refusing to create slot: max agent slots reached ({MAX_SLOTS}).")
+    if any(r["branch"] == branch for r in inv["worktrees"]):
+        raise SystemExit(f"Worktree branch already exists: {branch}")
+    if worktree.exists():
+        raise SystemExit(f"Worktree path already exists: {worktree}")
+    base = args.base or current_branch(repo)
+    root.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "add", "-b", branch, str(worktree), base)
+    print("created")
+    print(f"  branch:   {branch}")
+    print(f"  worktree: {worktree}")
+    print(f"  agent:    {args.agent}")
+    if args.no_launch:
+        print("  launch:   skipped (--no-launch)")
+    else:
+        print("  launch:   manual; cd into the worktree and start the agent explicitly")
+        print(f"            cd {worktree}")
+        print(f"            {args.agent}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Manage cmux agent worktree slots.")
+    parser.add_argument("--repo", default=str(default_repo()), help="Git repository root. Defaults to CMUX_REPO_DIR or cwd.")
+    parser.add_argument("--root", default="/Users/openclaw/Code/worktrees", help="Agent worktree root directory.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_list = sub.add_parser("list", help="List base and agent worktrees.")
+    p_list.add_argument("--json", action="store_true", help="Emit JSON inventory.")
+
+    p_create = sub.add_parser("create", help="Create one worktree-backed agent slot.")
+    p_create.add_argument("--slug", required=True, help="Task slug, used in branch and path names.")
+    p_create.add_argument("--agent", default="codex", help="Agent command label to show in launch instructions.")
+    p_create.add_argument("--base", help="Base branch/ref. Defaults to current branch.")
+    p_create.add_argument("--no-launch", action="store_true", help="Create worktree only; do not launch an agent.")
+
+    args = parser.parse_args(argv)
+    try:
+        if args.cmd == "list":
+            inv = inventory(Path(args.repo), Path(args.root))
+            if args.json:
+                print(json.dumps(inv, sort_keys=True))
+            else:
+                print_inventory(inv)
+            return 0
+        if args.cmd == "create":
+            return create(args)
+    except subprocess.CalledProcessError as exc:
+        print(git_error_message(exc), file=sys.stderr)
+        return exc.returncode or 1
+    raise SystemExit(f"unknown command: {args.cmd}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

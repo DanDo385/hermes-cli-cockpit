@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Local browser/front-end smoke checker for cockpit web surfaces."""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import http.server
+import socketserver
+import sys
+import threading
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, fmt: str, *args) -> None:  # keep smoke output clean
+        return
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Serve a directory on localhost and verify expected page content.")
+    parser.add_argument("--directory", default="web", help="Directory to serve. Defaults to ./web.")
+    parser.add_argument("--path", action="append", default=[], help="URL path to check. Repeatable.")
+    parser.add_argument("--expect", action="append", default=[], help="Expected text for corresponding --path. Repeatable.")
+    parser.add_argument("--timeout", type=float, default=5.0, help="HTTP request timeout seconds.")
+    return parser.parse_args()
+
+
+@contextlib.contextmanager
+def server(directory: Path):
+    if not directory.exists():
+        raise SystemExit(f"Missing browser smoke directory: {directory}")
+    handler = lambda *args, **kwargs: QuietHandler(*args, directory=str(directory), **kwargs)
+    with socketserver.TCPServer(("127.0.0.1", 0), handler) as httpd:
+        port = int(httpd.server_address[1])
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield port
+        finally:
+            httpd.shutdown()
+            thread.join(timeout=2)
+
+
+def fetch(url: str, timeout: float) -> str:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            body = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"FAIL {url}: HTTP {exc.code}\n{body[:300]}") from exc
+    if status < 200 or status >= 300:
+        raise SystemExit(f"FAIL {url}: HTTP {status}")
+    return body
+
+
+def main() -> int:
+    args = parse_args()
+    paths = args.path or ["/hermes/", "/openclaw/"]
+    expects = args.expect or ["Hermes", "OpenClaw"]
+    if len(expects) != len(paths):
+        raise SystemExit("--expect count must match --path count.")
+    directory = Path(args.directory).expanduser().resolve()
+    failures = 0
+    with server(directory) as port:
+        print(f"browser smoke server http://127.0.0.1:{port}/")
+        for path, expected in zip(paths, expects):
+            url = f"http://127.0.0.1:{port}{path}"
+            body = fetch(url, args.timeout)
+            if expected not in body:
+                failures += 1
+                print(f"FAIL {path}: missing expected text {expected!r}")
+            else:
+                print(f"PASS {path}: found {expected!r}")
+    if failures:
+        print(f"browser smoke failed: {failures} failure(s)")
+        return 1
+    print("browser smoke passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

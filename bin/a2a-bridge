@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Minimal A2A-style local bridge for the cmux/tmux cockpit.
+
+This is not a full network server yet. It exposes the protocol primitives we need
+first: an Agent Card and JSON-RPC over stdin/stdout for local smoke tests and
+future HTTP/SSE wrapping.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+
+def load_agent_worktree(root: Path):
+    path = root / "bin" / "agent-worktree"
+    loader = importlib.machinery.SourceFileLoader("agent_worktree", str(path))
+    spec = importlib.util.spec_from_loader("agent_worktree", loader)
+    if spec is None:
+        raise SystemExit(f"Cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def agent_card(repo: Path, root: Path) -> dict:
+    return {
+        "protocolVersion": "0.3.0-local",
+        "protocol_docs": "https://google.github.io/A2A/",
+        "name": "Hermes cmux Agent Orchestrator",
+        "description": "Local cmux/tmux orchestrator for worktree-backed CLI coding agents.",
+        "url": "local://hermes-cmux/a2a",
+        "preferredTransport": "jsonrpc-stdio",
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+            "stateTransitionHistory": True,
+        },
+        "skills": [
+            {
+                "id": "worktree_orchestration",
+                "name": "Worktree-backed agent slot orchestration",
+                "description": "Inspect and create isolated git worktrees for one-agent-per-branch workflows.",
+                "inputModes": ["application/json", "text/plain"],
+                "outputModes": ["application/json", "text/plain"],
+            },
+            {
+                "id": "browser_smoke",
+                "name": "Browser smoke testing",
+                "description": "Run local HTTP smoke checks against cockpit/front-end surfaces.",
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json", "text/plain"],
+            },
+        ],
+        "metadata": {
+            "repo": str(repo),
+            "worktree_root": str(root),
+            "safety": "Local-first. External posting and agent launch require explicit operator action.",
+        },
+    }
+
+
+def rpc_response(req: dict, result=None, error=None) -> dict:
+    resp = {"jsonrpc": "2.0", "id": req.get("id")}
+    if error is not None:
+        resp["error"] = error
+    else:
+        resp["result"] = result
+    return resp
+
+
+def invalid_request(message: str, request_id=None) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32600, "message": message}}
+
+
+def handle_rpc(req: object, repo: Path, root: Path) -> dict:
+    if not isinstance(req, dict):
+        return invalid_request("Invalid Request: JSON-RPC request must be an object")
+    aw = load_agent_worktree(repo_root())
+    method = req.get("method")
+    if not isinstance(method, str):
+        return invalid_request("Invalid Request: method must be a string", req.get("id"))
+    raw_params = req.get("params", {})
+    if raw_params is None:
+        params = {}
+    elif isinstance(raw_params, dict):
+        params = raw_params
+    else:
+        return rpc_response(req, error={"code": -32602, "message": "Invalid params: params must be an object"})
+    try:
+        if method == "agent.card":
+            return rpc_response(req, agent_card(repo, root))
+        if method == "agent.listWorktrees":
+            return rpc_response(req, aw.inventory(repo, root))
+        if method == "agent.createWorktreePreview":
+            slug = params.get("slug", "short-task-name")
+            safe_slug = aw.sanitize_slug(str(slug))
+            return rpc_response(
+                req,
+                {
+                    "branch": f"agent/{safe_slug}",
+                    "worktree": str(root / f"{aw.repo_name(repo)}-{safe_slug}"),
+                    "launch": "manual",
+                },
+            )
+        return rpc_response(req, error={"code": -32601, "message": f"Method not found: {method}"})
+    except SystemExit as exc:
+        return rpc_response(req, error={"code": -32000, "message": str(exc)})
+    except Exception as exc:  # defensive protocol boundary
+        return rpc_response(req, error={"code": -32001, "message": f"Bridge error: {exc}"})
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Expose local A2A-style cmux orchestration primitives.")
+    parser.add_argument("--repo", default=str(Path.cwd()), help="Git repository root.")
+    parser.add_argument("--root", default="/Users/openclaw/Code/worktrees", help="Agent worktree root.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("agent-card", help="Print Agent Card JSON.")
+    sub.add_parser("rpc", help="Read one JSON-RPC request from stdin and print one response.")
+    args = parser.parse_args(argv)
+    repo = Path(args.repo).expanduser().resolve()
+    root = Path(args.root).expanduser().resolve()
+    if args.cmd == "agent-card":
+        print(json.dumps(agent_card(repo, root), sort_keys=True))
+        return 0
+    if args.cmd == "rpc":
+        try:
+            req = json.loads(sys.stdin.read())
+        except json.JSONDecodeError as exc:
+            print(json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(exc)}}))
+            return 0
+        print(json.dumps(handle_rpc(req, repo, root), sort_keys=True))
+        return 0
+    raise SystemExit(f"unknown command: {args.cmd}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--channel-id", default=os.environ.get("DISCORD_CHANNEL_ID", ""), help="Discord channel/thread ID. Defaults to DISCORD_CHANNEL_ID.")
     parser.add_argument("--file", help="Markdown/text file to post.")
     parser.add_argument("--text", help="Literal text to post.")
+    parser.add_argument("--dry-run", action="store_true", help="Preview only. This is the default; kept for explicit command cards.")
     parser.add_argument("--send", action="store_true", help="Actually send to Discord. Without this, dry-run only.")
     return parser.parse_args()
 

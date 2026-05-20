@@ -8,6 +8,7 @@ TITLE="${CMUX_TITLE:-CMUX Agent Workbench}"
 REPO_DIR="${CMUX_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
 COCKPIT_ROOT="${CMUX_COCKPIT_ROOT:-/Users/openclaw/Code/hermes-cli-cockpit}"
 COCKPIT_BIN_DIR="${CMUX_COCKPIT_BIN_DIR:-$COCKPIT_ROOT/bin}"
+export PATH="$COCKPIT_BIN_DIR:$PATH"
 VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
 NVIM_APPNAME_VALUE="${CMUX_NVIM_APPNAME:-nvim}"
 BROWSER_URL="${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}"
@@ -458,6 +459,7 @@ show_browser() {
   present open
   present curl
   present python3
+  present browser-smoke
   present playwright
   present npx
   cat <<BROWSER
@@ -465,6 +467,7 @@ show_browser() {
 Open/smoke commands
   open "$BROWSER_URL"
   curl -I "$BROWSER_URL"
+  browser-smoke --directory "$COCKPIT_ROOT/web" --path /hermes/ --expect 'Hermes Mission Control' --path /openclaw/ --expect 'OpenClaw Mission Control'
   python3 -m http.server 4175 --directory "$REPO_DIR/web"
   CMUX_BROWSER_URL=http://127.0.0.1:4175/hermes/ cmux --reset
 
@@ -492,16 +495,21 @@ show_agents() {
   present hermes
   present openclaw
   present agent-deck
+  present agent-worktree
+  present a2a-bridge
   present git
   present tmux
-  printf '
-Live Agent Deck inventory
-'
-  if [[ -x "$COCKPIT_BIN_DIR/cockpit-workspaces" ]]; then
-    "$COCKPIT_BIN_DIR/cockpit-workspaces" inventory agent-deck 2>&1 | sed 's/^/  /'
+  printf '\nAgent worktree inventory\n'
+  if [[ -x "$COCKPIT_BIN_DIR/agent-worktree" ]]; then
+    "$COCKPIT_BIN_DIR/agent-worktree" --repo "$REPO_DIR" list 2>&1 | sed 's/^/  /'
   else
-    printf '  cockpit-workspaces missing: %s/cockpit-workspaces
-' "$COCKPIT_BIN_DIR"
+    printf '  agent-worktree missing: %s/agent-worktree\n' "$COCKPIT_BIN_DIR"
+  fi
+  printf '\nA2A local bridge card\n'
+  if [[ -x "$COCKPIT_BIN_DIR/a2a-bridge" ]]; then
+    "$COCKPIT_BIN_DIR/a2a-bridge" --repo "$REPO_DIR" agent-card 2>&1 | python3 -m json.tool 2>/dev/null | sed -n '1,60p' | sed 's/^/  /' || true
+  else
+    printf '  a2a-bridge missing: %s/a2a-bridge\n' "$COCKPIT_BIN_DIR"
   fi
   cat <<'AGENTS'
 
@@ -524,18 +532,13 @@ Recommended use
   agent-deck orchestration dashboard if installed later
 
 Launch patterns
-  cockpit-workspaces inventory agent-deck
-  cockpit-workspaces commands agent-deck
+  agent-worktree list
+  agent-worktree create --slug short-task-name --agent codex --no-launch
+  a2a-bridge agent-card | python3 -m json.tool
+  printf '{"jsonrpc":"2.0","id":"1","method":"agent.listWorktrees","params":{}}' | a2a-bridge rpc | python3 -m json.tool
 
-  # One agent, one branch, one worktree:
-  slug=short-task-name
-  branch="agent/$slug"
-  worktree="/Users/openclaw/Code/worktrees/$(basename "$PWD")-$slug"
-  mkdir -p "/Users/openclaw/Code/worktrees"
-  git worktree add -b "$branch" "$worktree" main
-  cd "$worktree"
-
-  # Launch exactly one agent in that worktree:
+  # Launch exactly one agent in that worktree after review:
+  cd /Users/openclaw/Code/worktrees/<repo>-<slug>
   codex        # or: claude / opencode / hermes --worktree
 
   # Review before merge:
@@ -749,6 +752,7 @@ CMDS
     browser)
       cat <<CMDS
 cd "$REPO_DIR"
+browser-smoke --directory "$COCKPIT_ROOT/web" --path /hermes/ --expect 'Hermes Mission Control' --path /openclaw/ --expect 'OpenClaw Mission Control'
 python3 -m http.server 4175 --directory web
 open "$BROWSER_URL"
 curl -I "$BROWSER_URL"
@@ -757,14 +761,11 @@ CMDS
     agents)
       cat <<CMDS
 cd "$REPO_DIR"
-cockpit-workspaces inventory agent-deck
-cockpit-workspaces commands agent-deck
-slug=short-task-name
-branch="agent/\$slug"
-worktree="/Users/openclaw/Code/worktrees/$(basename "$REPO_DIR")-\$slug"
-mkdir -p "/Users/openclaw/Code/worktrees"
-git worktree add -b "\$branch" "\$worktree" main
-cd "\$worktree"
+agent-worktree --repo "$REPO_DIR" list
+agent-worktree --repo "$REPO_DIR" create --slug short-task-name --agent codex --no-launch
+a2a-bridge --repo "$REPO_DIR" agent-card | python3 -m json.tool
+printf '{"jsonrpc":"2.0","id":"1","method":"agent.listWorktrees","params":{}}' | a2a-bridge --repo "$REPO_DIR" rpc | python3 -m json.tool
+cd /Users/openclaw/Code/worktrees/$(basename "$REPO_DIR")-short-task-name
 codex        # or: claude / opencode / hermes --worktree
 git status --short --branch
 git diff --stat
