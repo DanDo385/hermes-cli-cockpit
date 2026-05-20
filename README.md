@@ -99,6 +99,14 @@ OpenClaw browser ctrl: 19003
 
 Native cmux is the iMac visual cockpit layer. It is not the MBP tmux monitor.
 
+For the full ASCII visual operator manual covering pages, panes, launch, attach, detach, logs, ports, browser surfaces, agent slots, GitHub review, Obsidian notes, and Discord workflow, see the split runtime repo README:
+
+```text
+https://github.com/DanDo385/hermes-tmux-workspaces
+```
+
+That README documents the durable MBP `cockpit-workbench`, `mission-hermes`, and `mission-openclaw` tmux sessions that native cmux attaches to.
+
 ```text
 mission-hermes      MBP tmux runtime monitor for Hermes operations
 mission-openclaw    MBP tmux runtime monitor for OpenClaw operations
