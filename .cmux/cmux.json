@@ -28,8 +28,8 @@
     },
     {
       "name": "Obsidian Vault",
-      "description": "Open canonical Hermes workspace/vault path from a native cmux terminal surface.",
-      "command": "cd \"$HOME/.hermes/workspace\" && pwd && printf 'Vault root ready. Open Finder/file panel/browser/Obsidian surface from cmux.\\n'"
+      "description": "Open canonical Hermes Obsidian vault (terminal cwd + Obsidian or Finder).",
+      "command": "\"$HOME/Code/hermes-cli-cockpit/bin/open-hermes-vault\""
     }
   ],
   "actions": {
@@ -63,8 +63,8 @@
     "vault.root": {
       "type": "command",
       "title": "Vault Root",
-      "subtitle": "Open canonical Hermes workspace path",
-      "command": "cd \"$HOME/.hermes/workspace\" && pwd",
+      "subtitle": "Open Hermes vault in Obsidian or Finder",
+      "command": "\"$HOME/Code/hermes-cli-cockpit/bin/open-hermes-vault\"",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["obsidian", "vault", "notes"]

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Open the canonical Hermes Obsidian vault from native cmux (iMac-local).
+set -euo pipefail
+
+VAULT="${HERMES_VAULT:-${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}}"
+VAULT_NAME="${HERMES_OBSIDIAN_VAULT_NAME:-hermes}"
+PROJECT_NOTE="${HERMES_VAULT_PROJECT_FILE:-projects/hermes-cli-cockpit}"
+
+if [[ ! -d "$VAULT" ]]; then
+  printf 'open-hermes-vault: vault directory missing: %s\n' "$VAULT" >&2
+  printf 'Expected canonical path: $HOME/.hermes/workspace\n' >&2
+  printf 'Create it or export HERMES_VAULT to your vault root.\n' >&2
+  exit 1
+fi
+
+cd "$VAULT"
+printf 'Vault root: %s\n' "$(pwd)"
+
+if ! command -v open >/dev/null 2>&1; then
+  printf 'open(1) not available; stay in this terminal at the vault root.\n'
+  exit 0
+fi
+
+# Prefer Obsidian deep link; fall back to Finder at vault root.
+if open "obsidian://open?vault=${VAULT_NAME}&file=${PROJECT_NOTE}" 2>/dev/null; then
+  printf 'Opened Obsidian: vault=%s file=%s\n' "$VAULT_NAME" "$PROJECT_NOTE"
+elif open "obsidian://open?vault=${VAULT_NAME}" 2>/dev/null; then
+  printf 'Opened Obsidian: vault=%s\n' "$VAULT_NAME"
+else
+  open "$VAULT"
+  printf 'Opened vault in Finder (Obsidian URI unavailable).\n'
+  printf 'If Obsidian uses a different vault name, set HERMES_OBSIDIAN_VAULT_NAME.\n'
+fi
