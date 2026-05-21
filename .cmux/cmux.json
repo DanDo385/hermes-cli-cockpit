@@ -4,12 +4,12 @@
     {
       "name": "Hermes Tool / Hermes CLI Mission Control",
       "description": "Peer AI assistant surface: conversation, sessions, models, tools, auth, notes, ops — not merged with OpenClaw.",
-      "command": "ssh mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'"
+      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'"
     },
     {
       "name": "OpenClaw Tool / OpenClaw CLI Mission Control",
       "description": "Peer AI runtime surface alongside Hermes. Missing features show unsupported/not configured — pane stays visible.",
-      "command": "ssh mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'"
+      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'"
     },
     {
       "name": "Coding Workbench",
@@ -37,7 +37,7 @@
       "type": "command",
       "title": "Hermes Mission Control",
       "subtitle": "Hermes conversation, sessions, models, tools, ops",
-      "command": "ssh mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'",
+      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["hermes", "mbp", "gateway", "runtime", "tmux", "mission"]
@@ -46,7 +46,7 @@
       "type": "command",
       "title": "OpenClaw Mission Control",
       "subtitle": "Peer runtime — separate from Hermes",
-      "command": "ssh mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'",
+      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'",
       "target": "newTabInCurrentPane",
       "confirm": false,
       "keywords": ["openclaw", "mbp", "gateway", "runtime", "tmux", "mission"]
