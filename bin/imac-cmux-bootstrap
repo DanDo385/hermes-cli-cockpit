@@ -142,7 +142,18 @@ reload_config() {
   ensure_imac_context
   cbin="$(cmux_bin)"
   python3 -m json.tool "$CMUX_CONFIG" >/dev/null
+  set +e
   "$cbin" reload-config
+  rc=$?
+  set -e
+  case "$rc" in
+    0) return 0 ;;
+    143)
+      echo "cmux reload-config returned 143 after signaling reload; continuing"
+      return 0
+      ;;
+    *) return "$rc" ;;
+  esac
 }
 
 launch_cmux() {
