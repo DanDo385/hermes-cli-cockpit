@@ -192,7 +192,8 @@ bin/imac-cmux-bootstrap --install
 # Reload .cmux/cmux.json after button/config edits.
 bin/imac-cmux-bootstrap --reload-config
 
-# Open the native cmux GUI on the iMac.
+# Open the native cmux GUI on the iMac with this repo as the active workspace.
+# This is what lets cmux load .cmux/cmux.json actions/buttons.
 bin/imac-cmux-bootstrap --launch
 ```
 

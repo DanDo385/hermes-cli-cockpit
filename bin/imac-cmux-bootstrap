@@ -147,13 +147,16 @@ reload_config() {
 
 launch_cmux() {
   ensure_imac_context
+  # cmux loads project-local .cmux/cmux.json only when the repo folder is
+  # opened as the workspace. Opening the app alone drops the operator into a
+  # generic shell, usually at $HOME, with no Hermes cockpit actions loaded.
   if [ -d /Applications/cmux.app ]; then
-    open -a /Applications/cmux.app
+    open -a /Applications/cmux.app "$REPO_ROOT"
   elif [ -d "$HOME/Applications/cmux.app" ]; then
-    open "$HOME/Applications/cmux.app"
+    open -a "$HOME/Applications/cmux.app" "$REPO_ROOT"
   else
     cbin="$(cmux_bin)"
-    open "$cbin"
+    open -a "$cbin" "$REPO_ROOT"
   fi
 }
 
