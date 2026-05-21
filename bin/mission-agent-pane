@@ -70,8 +70,27 @@ run_agent() {
   fi
 }
 
+unsupported_state() {
+  local feature="$1" hint="${2:-Check OpenClaw docs or configure the equivalent Hermes surface separately.}"
+  printf '%s: unsupported/not configured\n\n' "$feature"
+  printf 'Runtime owner: %s\n' "$(agent_label)"
+  printf 'Peer runtime:  %s (use mission-%s for that surface)\n\n' \
+    "$( [[ "$AGENT" == openclaw ]] && printf Hermes || printf OpenClaw )" \
+    "$( [[ "$AGENT" == openclaw ]] && printf hermes || printf openclaw )"
+  printf '%s\n' "$hint"
+  printf '\nBoundary: this pane stays visible even when the feature is missing.\n'
+}
+
+openclaw_supports() {
+  if [[ "$AGENT" != "openclaw" ]]; then
+    return 0
+  fi
+  openclaw $OPENCLAW_PROFILE_FLAG "$@" >/dev/null 2>&1
+}
+
 show_page_guide() {
-  local page="$PAGE"
+  local page="$PAGE" owner
+  owner="$(agent_label)"
   cat <<GUIDE
 PAGE SHORTCUTS
   Ctrl-b w       page picker
@@ -81,99 +100,179 @@ PAGE SHORTCUTS
   Ctrl-b z       zoom current pane
   Ctrl-b d       detach safely
 
-WINDOWS
-  0 chat       main ${AGENT} CLI/TUI chat
-  1 overview   health, URLs, operator map
-  2 gateway    gateway status + control hints
-  3 cron       cron status/jobs
-  4 sessions   session list + cleanup hints
-  5 heartbeat  heartbeat/system events
-  6 ports      local listeners + port registry
-  7 secrets    1Password/SSH readiness only
-  8 logs       gateway/agent logs
-  9 scratch    blank command shell
+WINDOWS ($owner mission control — peer surface, not merged with Hermes/OpenClaw)
+  0 chat       $owner | conversation
+  1 sessions   $owner Sessions | list, browse, continue, resume, export
+  2 models     $owner Models | default, aux, cron routes
+  3 tools      $owner Tools | tools, skills, MCPs
+  4 secrets    $owner 1Password | no raw secrets
+  5 notes      $owner Notes | vault runbooks
+  6 gateway    $owner Ops | gateway health
+  7 cron       $owner Ops | cron + latest output
+  8 ops        $owner Ops | logs, ports, launchd
+  9 scratch    $owner Commands | operator sheet
 
 THIS PAGE
 GUIDE
   case "$page" in
-    chat) printf '  Type to %s in the large pane. Use /help inside the CLI/TUI.\n' "$AGENT" ;;
-    overview) printf '  Read health first. URLs show MBP-local and Tailscale/tunnel options.\n' ;;
-    gateway) printf '  Start/stop/probe gateway. Do not restart-loop during provider/platform outages.\n' ;;
-    cron) printf '  Inspect scheduled jobs. Cron runs through each agent gateway/scheduler.\n' ;;
-    sessions) printf '  List sessions. Inspect before cleanup. Never kill gateway PID casually.\n' ;;
-    heartbeat) printf '  Check heartbeat/system presence and launchd heartbeat for Hermes.\n' ;;
-    ports) printf '  Find which process owns each port. Inspection before mutation.\n' ;;
-    secrets) printf '  Safe readiness only. No raw token/env/secret output.\n' ;;
-    logs) printf '  Follow logs. Compare timestamps before treating old errors as active.\n' ;;
-    scratch) printf '  Free shell for experiments. Use repo worktrees for code changes.\n' ;;
-    *) printf '  General cockpit pane.\n' ;;
+    chat) printf '  Type to %s here. Conversation belongs to %s only.\n' "$AGENT" "$owner" ;;
+    sessions) printf '  Session store for %s. Export/resume where supported.\n' "$owner" ;;
+    models) printf '  Model registry and route awareness for %s.\n' "$owner" ;;
+    tools) printf '  Tools, skills, and MCP status for %s.\n' "$owner" ;;
+    secrets) printf '  op whoami / vault metadata only. Never print raw secrets.\n' ;;
+    notes) printf '  Obsidian runbooks at ~/.hermes/workspace — label notes by runtime owner.\n' ;;
+    gateway) printf '  Gateway health for %s. Hermes owns production launchd unless explicitly shifted.\n' "$owner" ;;
+    cron) printf '  Cron registry and latest outputs for %s.\n' "$owner" ;;
+    ops) printf '  Logs, ports, processes, launchd/service health for %s.\n' "$owner" ;;
+    scratch) printf '  Command sheet shell. Pane titles name the owning runtime.\n' ;;
+    *) printf '  General %s mission-control pane.\n' "$owner" ;;
   esac
 }
 
-show_overview() {
-  printf 'Operator model\n'
-  printf '  launchd owns durable production services. tmux owns visibility and manual control.\n'
-  printf '  Hermes remains production/stable. OpenClaw mode: %s; dev/loopback is available for debugging.\n\n' "$OPENCLAW_MODE"
-
-  printf 'CLI entrypoints\n'
-  printf '  Chat/TUI:        '
-  if [[ "$AGENT" == "openclaw" ]]; then
-    if [[ -n "$OPENCLAW_PROFILE_FLAG" ]]; then
-      printf 'openclaw %s tui\n' "$OPENCLAW_PROFILE_FLAG"
+show_models() {
+  if [[ "$AGENT" == "hermes" ]]; then
+    printf 'Hermes model registry / route awareness\n\n'
+    if hermes models list >/dev/null 2>&1; then
+      hermes models list 2>&1 | sed -n '1,80p' || true
+    elif hermes routes list >/dev/null 2>&1; then
+      hermes routes list 2>&1 | sed -n '1,80p' || true
     else
-      printf 'openclaw tui\n'
+      printf 'CLI model list unavailable; reading registry hints from config when present.\n\n'
+      for f in "$HERMES_HOME/config/models.toml" "$HERMES_HOME/config/routes.toml" "$HERMES_HOME/models.json"; do
+        [[ -f "$f" ]] && printf '  registry file: %s\n' "$f"
+      done
     fi
+    printf '\nCron route summary (auxiliary/cron paths)\n'
+    show_hermes_cron_routes
+    cat <<'HM'
+
+Useful Hermes model commands:
+  hermes models list          # when available
+  hermes routes list          # when available
+  hermes cron list            # inspect cron-owned routes
+HM
   else
-    printf 'hermes\n'
-  fi
-  printf '  Gateway status:  %s gateway status\n' "$(agent_cmd)"
-  printf '  Cron list:       %s cron list\n' "$(agent_cmd)"
-  printf '  Sessions:        %s sessions%s\n' "$(agent_cmd)" "$([[ "$AGENT" == hermes ]] && printf ' list' || true)"
-
-  printf '\nPorts and pages\n'
-  if [[ -n "$WEB_PORT" ]]; then
-    printf '  MBP local page:      http://127.0.0.1:%s/\n' "$WEB_PORT"
-    if command -v tailscale >/dev/null 2>&1; then
-      local tip
-      tip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
-      [[ -n "$tip" ]] && printf '  Tailscale direct:    http://%s:%s/\n' "$tip" "$WEB_PORT"
+    printf 'OpenClaw Models | provider, config, routes\n\n'
+    if openclaw $OPENCLAW_PROFILE_FLAG models list >/dev/null 2>&1; then
+      openclaw $OPENCLAW_PROFILE_FLAG models list 2>&1 | sed -n '1,80p' || true
+    elif openclaw $OPENCLAW_PROFILE_FLAG config show >/dev/null 2>&1; then
+      openclaw $OPENCLAW_PROFILE_FLAG config show 2>&1 | sed -n '1,80p' || true
+    else
+      unsupported_state "OpenClaw model registry / route awareness" \
+        "Try: openclaw config show ; openclaw --dev models list"
     fi
   fi
-  [[ -n "$GATEWAY_PORT" ]] && printf '  Gateway port:        %s\n' "$GATEWAY_PORT"
-  [[ -n "$BROWSER_PORT" ]] && printf '  Browser/control:     %s\n' "$BROWSER_PORT"
+}
+
+show_tools() {
+  if [[ "$AGENT" == "hermes" ]]; then
+    printf 'Hermes Tools | tools, skills, MCPs\n\n'
+    if hermes tools list >/dev/null 2>&1; then
+      printf 'Tools registry\n'
+      hermes tools list 2>&1 | sed -n '1,60p' || true
+      printf '\n'
+    fi
+    if hermes skills list >/dev/null 2>&1; then
+      printf 'Skills registry\n'
+      hermes skills list 2>&1 | sed -n '1,60p' || true
+      printf '\n'
+    fi
+    if hermes mcp list >/dev/null 2>&1; then
+      printf 'MCP servers\n'
+      hermes mcp list 2>&1 | sed -n '1,60p' || true
+      printf '\n'
+    else
+      printf 'MCP CLI list unavailable; use gateway/toolset inspection or config under ~/.hermes\n'
+    fi
+    cat <<'HT'
+
+Useful Hermes capability commands:
+  hermes tools list
+  hermes skills list
+  hermes mcp list
+  hermes mcp test <name>      # when available
+HT
+  else
+    printf 'OpenClaw Tools | capabilities, MCPs, auth\n\n'
+    local any=0
+    if openclaw $OPENCLAW_PROFILE_FLAG tools list >/dev/null 2>&1; then
+      openclaw $OPENCLAW_PROFILE_FLAG tools list 2>&1 | sed -n '1,60p' || true
+      any=1
+    fi
+    if openclaw $OPENCLAW_PROFILE_FLAG mcp list >/dev/null 2>&1; then
+      printf '\nMCP\n'
+      openclaw $OPENCLAW_PROFILE_FLAG mcp list 2>&1 | sed -n '1,60p' || true
+      any=1
+    fi
+    if [[ "$any" -eq 0 ]]; then
+      unsupported_state "OpenClaw tools/skills/MCP registry" \
+        "Try: openclaw --dev tools list ; openclaw --dev mcp list"
+    fi
+  fi
+}
+
+show_notes() {
+  local vault="${HERMES_HOME}/workspace"
+  printf '%s Notes | vault runbooks\n\n' "$(agent_label)"
+  printf 'Canonical vault: %s\n\n' "$vault"
   if [[ "$AGENT" == "openclaw" ]]; then
-    cat <<'OCURL'
-
-OpenClaw remote-view safety:
-  iMac native cmux browser panes should ride the cmux SSH workspace when available.
-  Plain SSH/Tailscale tunnel fallback:
-    ssh -N -L 19001:127.0.0.1:19001 -L 19003:127.0.0.1:19003 ai-remote
-  Then browse on iMac:
-    http://127.0.0.1:19001/
-  Direct tailnet exposure should use token auth, not --auth none.
-OCURL
+    printf 'Boundary notes (OpenClaw owns vs Hermes owns)\n'
+    cat <<'BN'
+  OpenClaw owns: OpenClaw gateway/lab runtime, OpenClaw sessions, OpenClaw credentials scope.
+  Hermes owns: production launchd gateway, Hermes cron dispatch, Hermes session store.
+  Shared read-only: Obsidian vault at ~/.hermes/workspace — label notes by runtime owner.
+  Never share raw secrets between Hermes and OpenClaw panes.
+BN
   fi
-
-  printf '\nHost gateway process baseline\n'
-  printf '  Shows both durable Hermes production gateway and OpenClaw dev gateway when present.\n'
-  ps axo pid,ppid,rss,vsz,etime,comm,args | python3 -c '
-import sys
-for line in sys.stdin:
-    parts=line.split(None,6)
-    if len(parts) >= 7:
-        pid,ppid,rss,vsz,etime,comm,args=parts
-        is_hermes = " -m hermes_cli.main gateway " in args and " -c " not in args
-        is_openclaw = "openclaw-gateway" in args and " -c " not in args
-        if not (is_hermes or is_openclaw):
-            continue
-        label = "hermes-prod-gateway" if is_hermes else "openclaw-dev-gateway"
-        print(f"  {label}: pid={pid} ppid={ppid} rss={int(rss)/1024:.1f}MB elapsed={etime} cmd={comm} {args[:90]}")
-' || true
-
-  if [[ "$AGENT" == "hermes" ]] && command -v hermes-health >/dev/null 2>&1; then
-    printf '\nHermes health snapshot\n'
-    hermes-health 2>&1 | sed -n '1,90p' || true
+  for rel in \
+    "projects/hermes-cli-cockpit" \
+    "agent-hermes/notes/next-steps.md" \
+    "agent-hermes/notes/open-items.md"; do
+    local p="$vault/$rel"
+    if [[ -e "$p" ]]; then
+      printf '  ✅ %s\n' "$p"
+    else
+      printf '  ⚪ %s\n' "$p"
+    fi
+  done
+  if [[ "$AGENT" == "openclaw" ]]; then
+    local oc="$vault/projects/openclaw"
+    [[ -e "$oc" ]] && printf '  ✅ %s\n' "$oc" || printf '  ⚪ %s (create for OpenClaw runbooks)\n' "$oc"
   fi
+  cat <<NOTES
+
+Open commands (metadata only — no secret paths printed):
+  cd "$vault" && pwd
+  nvim "$vault/projects/hermes-cli-cockpit"
+  open "obsidian://open?vault=hermes&file=projects/hermes-cli-cockpit"
+NOTES
+}
+
+show_ops() {
+  printf '%s Ops | logs, ports, processes, launchd\n\n' "$(agent_label)"
+  if [[ "$AGENT" == "hermes" ]]; then
+    if command -v hermes-health >/dev/null 2>&1; then
+      hermes-health 2>&1 | sed -n '1,50p' || true
+      printf '\n'
+    fi
+    printf 'Hermes launchd services\n'
+    launchctl list 2>/dev/null | grep -E 'ai\.hermes\.(gateway|heartbeat)' || true
+    printf '\nRecent gateway log tail\n'
+    tail -n 25 "$HERMES_LOG_DIR/gateway.log" 2>/dev/null || printf '  gateway.log unavailable\n'
+  else
+    openclaw $OPENCLAW_PROFILE_FLAG gateway status 2>&1 | sed -n '1,20p' || true
+    printf '\nOpenClaw log tail\n'
+    mkdir -p "$(dirname "$OPENCLAW_LOG_FILE")"
+    tail -n 25 "$OPENCLAW_LOG_FILE" 2>/dev/null || printf '  %s unavailable\n' "$OPENCLAW_LOG_FILE"
+    if ! openclaw $OPENCLAW_PROFILE_FLAG system heartbeat --help >/dev/null 2>&1; then
+      printf '\n'
+      unsupported_state "OpenClaw launchd/service heartbeat panel" "Use gateway status and logs above."
+    fi
+  fi
+  printf '\nPorts / listeners\n'
+  show_ports
+  printf '\nRelated processes\n'
+  ps axww -o pid,ppid,etime,command | grep -E 'hermes_cli|openclaw-gateway|/usr/local/bin/openclaw|mission-agent-pane' | grep -v grep | sed -n '1,40p' || true
 }
 
 show_gateway() {
@@ -274,9 +373,13 @@ PY
 
 show_cron() {
   if [[ "$AGENT" == "openclaw" ]]; then
-    openclaw $OPENCLAW_PROFILE_FLAG cron status 2>&1 || true
-    printf '\n'
-    openclaw $OPENCLAW_PROFILE_FLAG cron list 2>&1 || true
+    if openclaw $OPENCLAW_PROFILE_FLAG cron status >/dev/null 2>&1; then
+      openclaw $OPENCLAW_PROFILE_FLAG cron status 2>&1 || true
+      printf '\n'
+      openclaw $OPENCLAW_PROFILE_FLAG cron list 2>&1 || true
+    else
+      unsupported_state "OpenClaw cron scheduler" "Try: openclaw --dev cron list"
+    fi
     cat <<'OCC'
 
 Useful OpenClaw cron commands:
@@ -312,14 +415,22 @@ HCRON
 
 show_sessions() {
   if [[ "$AGENT" == "openclaw" ]]; then
-    openclaw $OPENCLAW_PROFILE_FLAG sessions --all-agents 2>&1 | sed -n '1,120p' || true
+    if openclaw $OPENCLAW_PROFILE_FLAG sessions --all-agents >/dev/null 2>&1; then
+      openclaw $OPENCLAW_PROFILE_FLAG sessions --all-agents 2>&1 | sed -n '1,120p' || true
+    elif openclaw $OPENCLAW_PROFILE_FLAG sessions >/dev/null 2>&1; then
+      openclaw $OPENCLAW_PROFILE_FLAG sessions 2>&1 | sed -n '1,120p' || true
+    else
+      unsupported_state "OpenClaw session list" "Try: openclaw --dev sessions --all-agents"
+    fi
     cat <<'OCS'
 
-Useful OpenClaw session commands:
+Useful OpenClaw session commands (where supported):
   openclaw --dev sessions
   openclaw --dev sessions --all-agents
   openclaw --dev sessions --active 120
   openclaw --dev sessions cleanup
+
+Export/resume parity with Hermes may be unsupported/not configured — check CLI help before assuming.
 OCS
   else
     hermes sessions list 2>&1 | sed -n '1,80p' || true
@@ -476,16 +587,18 @@ open_shell() {
 
 case "$ROLE" in
   chat) open_chat ;;
-  overview) loop "overview" 20 show_overview ;;
+  models) loop "models" 30 show_models ;;
+  tools) loop "tools" 30 show_tools ;;
+  notes) loop "notes" 45 show_notes ;;
+  ops) loop "ops" 20 show_ops ;;
   gateway) loop "gateway" 15 show_gateway ;;
   cron) loop "cron" 30 show_cron ;;
   sessions) loop "sessions" 45 show_sessions ;;
-  heartbeat) loop "heartbeat" 45 show_heartbeat ;;
   ports) loop "ports" 20 show_ports ;;
   secrets|security) loop "secrets readiness" 60 show_secrets ;;
   logs) follow_logs ;;
   guide) loop "shortcuts" 60 show_page_guide ;;
   shell) open_shell ;;
-  scratch) open_shell ;;
+  command-sheet|scratch) open_shell ;;
   *) printf 'Unknown mission-agent-pane role: %s\n' "$ROLE" >&2; exit 2 ;;
 esac

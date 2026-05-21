@@ -38,9 +38,13 @@ bin/mission --no-attach
 bin/mission-hermes --no-attach
 bin/mission-openclaw --no-attach
 bin/cctx
+bin/cockpit-workspaces verify
 bin/cockpit-workspaces list
-bin/cockpit-workspaces commands openclaw
+bin/cockpit-workspaces show coding-workbench
+bin/cockpit-workspaces show open-source-radar
 bin/cockpit-workspaces inventory agent-deck
+bin/cockpit-community --no-attach
+bin/keystroke-mentor --context nvim --limit 8
 bin/agent-worktree list
 bin/agent-worktree create --slug fix-login-flow --agent codex --no-launch
 bin/a2a-bridge agent-card | python3 -m json.tool
@@ -76,22 +80,39 @@ port-who 3000
 
 ## Dual mission controls
 
-`mission-hermes` and `mission-openclaw` intentionally have the same tmux layout:
+`mission-hermes` and `mission-openclaw` are **peer** AI assistant/runtime surfaces with the same mission-control shape. Do not collapse them into one generic agent pane.
 
 ```text
-0 chat       main CLI/TUI chat
-1 overview   health, URLs, process summary
-2 gateway    gateway status/control hints
-3 cron       scheduler/jobs
-4 sessions   stored sessions/processes
-5 heartbeat  heartbeat/system events
-6 ports      port ownership and registry
-7 secrets    1Password/SSH readiness, no raw values
-8 logs       detailed runtime logs
-9 scratch    shell
+0 chat       Hermes | or OpenClaw | conversation
+1 sessions   list, browse, continue, resume, export (where supported)
+2 models     default, delegation, auxiliary, cron routes
+3 tools      tools, skills, MCP list/test/status
+4 secrets    1Password/SSH readiness, no raw values
+5 notes      Obsidian vault runbooks at ~/.hermes/workspace
+6 gateway    gateway health + control hints
+7 cron       scheduler + latest job output
+8 ops        logs, ports, processes, launchd/service health
+9 scratch    command sheet shell
 ```
 
-Every window has a shortcut pane at the bottom with the local navigation map. Use the bottom tmux bar numbers with `Ctrl-b 0-9`.
+OpenClaw shows `unsupported/not configured` when a Hermes-equivalent feature is missing — the pane stays visible.
+
+## Five cockpit workspaces
+
+```text
+1 Hermes Tool / Hermes CLI Mission Control    mission-hermes
+2 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
+3 Coding Workbench                            cockpit-workbench (tmux-workbench)
+4 Agent Deck                                  cockpit-workbench:agents
+5 Open Source Radar / Community               cockpit-community
+```
+
+```bash
+bin/cockpit-workspaces verify
+bin/cockpit-workspaces list
+bin/cockpit-community --no-attach
+bin/keystroke-mentor --context nvim --watch --interval 30
+```
 
 Default page ports:
 

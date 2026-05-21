@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${COCKPIT_SESSION:?COCKPIT_SESSION is required}"
+TITLE="${COCKPIT_TITLE:?COCKPIT_TITLE is required}"
+REPO_DIR="${COCKPIT_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+PANE="$REPO_DIR/bin/cockpit-community-pane"
+NO_ATTACH=0
+RESET=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-attach) NO_ATTACH=1 ;;
+    --reset|--rebuild) RESET=1 ;;
+    -h|--help)
+      cat <<HELP
+cockpit-community: Open Source Radar / Community tmux deck
+
+Usage:
+  cockpit-community              create/attach OSS radar session
+  cockpit-community --no-attach  create/verify without attaching
+  cockpit-community --reset      rebuild layout
+
+Windows:
+  0 projects       project registry (Hermes seed, add repos)
+  1 github         Hermes GitHub PRs, issues, commits
+  2 my-prs         Dan's PRs, review, CI, merge state
+  3 discussions    GitHub + Discord drafts (no surprise posting)
+  4 contributions  submitted / accepted tracking
+  5 scratch        free shell
+
+Posting rule: draft-first. Explicit send/post only after review.
+HELP
+      exit 0
+      ;;
+    *)
+      echo "cockpit-community-agent: unknown arg: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "cockpit-community-agent: required command missing: $1" >&2
+    exit 1
+  fi
+}
+
+pane_cmd() {
+  local role="$1" page="${2:-$1}"
+  printf 'COCKPIT_SESSION=%q COCKPIT_TITLE=%q COCKPIT_REPO_DIR=%q COCKPIT_GITHUB_REPO=%q COCKPIT_VAULT=%q %q %q %q' \
+    "$SESSION" "$TITLE" "$REPO_DIR" "${COCKPIT_GITHUB_REPO:-DanDo385/hermes-cli-cockpit}" "${COCKPIT_VAULT:-$HOME/.hermes/workspace}" "$PANE" "$role" "$page"
+}
+
+set_pane_title() {
+  tmux select-pane -t "$1" -T "$2" >/dev/null 2>&1 || true
+}
+
+setup_tmux_options() {
+  tmux set-option -t "$SESSION" status on >/dev/null
+  tmux set-option -t "$SESSION" status-position bottom >/dev/null
+  tmux set-option -t "$SESSION" status-left "#[bold] $TITLE #[fg=cyan]#I:#W #[default]" >/dev/null
+  tmux set-option -t "$SESSION" status-right '#[fg=green]C-b w picker #[fg=yellow]C-b z zoom #[fg=cyan]C-b d detach #[fg=white]#H %H:%M' >/dev/null
+  tmux set-option -t "$SESSION" pane-border-status top >/dev/null
+  tmux set-option -t "$SESSION" pane-border-format ' #{pane_title} ' >/dev/null
+  tmux set-option -t "$SESSION" allow-set-title off >/dev/null
+  tmux set-option -t "$SESSION" set-titles on >/dev/null
+  tmux set-window-option -t "$SESSION" automatic-rename off >/dev/null
+}
+
+add_guide() {
+  local target="$1" page="$2" guide
+  guide="$(tmux split-window -v -l 11 -t "$target" -P -F '#{pane_id}' "$(pane_cmd guide "$page")")"
+  set_pane_title "$guide" "Command hints - $page"
+}
+
+new_page() {
+  local index="$1" name="$2" role="$3" title="$4" main
+  if [[ "$index" == "0" ]]; then
+    tmux new-session -d -s "$SESSION" -n "$name" "$(pane_cmd "$role" "$name")"
+    setup_tmux_options
+  else
+    tmux new-window -t "$SESSION:$index" -n "$name" "$(pane_cmd "$role" "$name")"
+  fi
+  main="$(tmux list-panes -t "$SESSION:$name" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "$title"
+  add_guide "$main" "$name"
+  tmux select-pane -t "$main" >/dev/null
+}
+
+build_session() {
+  new_page 0 projects projects "Projects | Hermes seed, add repos"
+  new_page 1 github github "Hermes GitHub | PRs, issues, commits"
+  new_page 2 my-prs my-prs "My PRs | review, CI, merge state"
+  new_page 3 discussions discussions "Discussions | GitHub + Discord"
+  new_page 4 contributions contributions "Contributions | submitted, accepted"
+  new_page 5 notes notes "OSS notes | vault + drafts"
+  new_page 6 command-sheet command-sheet "OSS Commands | draft-first sheet"
+  tmux select-window -t "$SESSION:0"
+}
+
+require tmux
+require zsh
+chmod +x "$PANE" >/dev/null 2>&1 || true
+require "$PANE"
+
+if [[ "$RESET" -eq 1 ]] && tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux kill-session -t "$SESSION"
+fi
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  build_session
+else
+  setup_tmux_options
+fi
+
+if [[ "$NO_ATTACH" -eq 1 ]]; then
+  echo "cockpit-community: session ready: $SESSION"
+  tmux list-windows -t "$SESSION" -F '#{window_index}: #{window_name} panes=#{window_panes}'
+  echo "Attach: tmux attach -d -t $SESSION"
+else
+  exec tmux attach -d -t "$SESSION"
+fi

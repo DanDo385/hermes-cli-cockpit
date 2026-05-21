@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${CMUX_SESSION:-cockpit-workbench}"
+TITLE="${CMUX_TITLE:-Coding Workbench}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COCKPIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+STATE_FILE="${CMUX_CONTEXT_STATE_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/hermes-cli-cockpit/cctx.env}"
+EXPLICIT_CMUX_REPO_DIR="${CMUX_REPO_DIR-}"
+EXPLICIT_CMUX_CONTEXT_PATH="${CMUX_CONTEXT_PATH-}"
+EXPLICIT_CMUX_CONTEXT_KIND="${CMUX_CONTEXT_KIND-}"
+EXPLICIT_CMUX_CONTEXT_NAME="${CMUX_CONTEXT_NAME-}"
+EXPLICIT_CMUX_BROWSER_URL="${CMUX_BROWSER_URL-}"
+EXPLICIT_OBSIDIAN_VAULT_PATH="${OBSIDIAN_VAULT_PATH-}"
+
+load_cctx_state() {
+  [[ "${CMUX_USE_CCTX_STATE:-1}" == "1" ]] || return 0
+  [[ -r "$STATE_FILE" ]] || return 0
+
+  local key value
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      CMUX_CONTEXT_PATH|CMUX_CONTEXT_KIND|CMUX_CONTEXT_NAME|CMUX_REPO_DIR|CMUX_BROWSER_URL|CMUX_MISSION_HINT|OBSIDIAN_VAULT_PATH)
+        printf -v "$key" '%s' "$value"
+        ;;
+    esac
+  done < <(python3 - "$STATE_FILE" <<'PY'
+import shlex
+import sys
+
+allowed = {
+    "CMUX_CONTEXT_PATH",
+    "CMUX_CONTEXT_KIND",
+    "CMUX_CONTEXT_NAME",
+    "CMUX_REPO_DIR",
+    "CMUX_BROWSER_URL",
+    "CMUX_MISSION_HINT",
+    "OBSIDIAN_VAULT_PATH",
+}
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            try:
+                parts = shlex.split(raw, posix=True)
+            except ValueError:
+                continue
+            if len(parts) != 2 or parts[0] != "export" or "=" not in parts[1]:
+                continue
+            key, value = parts[1].split("=", 1)
+            if key in allowed:
+                print(f"{key}\t{value}")
+except OSError:
+    pass
+PY
+  )
+}
+
+if [[ "${CMUX_USE_CCTX_STATE:-1}" == "1" ]] && [[ -r "$STATE_FILE" ]]; then
+  load_cctx_state
+fi
+[[ -n "$EXPLICIT_CMUX_REPO_DIR" ]] && CMUX_REPO_DIR="$EXPLICIT_CMUX_REPO_DIR"
+[[ -n "$EXPLICIT_CMUX_CONTEXT_PATH" ]] && CMUX_CONTEXT_PATH="$EXPLICIT_CMUX_CONTEXT_PATH"
+[[ -n "$EXPLICIT_CMUX_CONTEXT_KIND" ]] && CMUX_CONTEXT_KIND="$EXPLICIT_CMUX_CONTEXT_KIND"
+[[ -n "$EXPLICIT_CMUX_CONTEXT_NAME" ]] && CMUX_CONTEXT_NAME="$EXPLICIT_CMUX_CONTEXT_NAME"
+[[ -n "$EXPLICIT_CMUX_BROWSER_URL" ]] && CMUX_BROWSER_URL="$EXPLICIT_CMUX_BROWSER_URL"
+[[ -n "$EXPLICIT_OBSIDIAN_VAULT_PATH" ]] && OBSIDIAN_VAULT_PATH="$EXPLICIT_OBSIDIAN_VAULT_PATH"
+REPO_DIR="${CMUX_REPO_DIR:-$COCKPIT_ROOT}"
+PANE="$SCRIPT_DIR/cmux-pane"
+NVIM_APPNAME_VALUE="${CMUX_NVIM_APPNAME:-nvim}"
+VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
+TOPOLOGY="${CMUX_TOPOLOGY:-integrated}"
+CONTEXT_PATH="${CMUX_CONTEXT_PATH:-$REPO_DIR}"
+CONTEXT_KIND="${CMUX_CONTEXT_KIND:-project}"
+CONTEXT_NAME="${CMUX_CONTEXT_NAME:-$(basename "$CONTEXT_PATH")}"
+GUIDE_MODE="${CMUX_GUIDE_MODE:-full}"
+NO_ATTACH=0
+RESET=0
+PROJECT_ARG=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-attach) NO_ATTACH=1 ;;
+    --reset|--rebuild) RESET=1 ;;
+    --one-session|--integrated) TOPOLOGY="integrated" ;;
+    --two-sessions|--split-sessions) TOPOLOGY="split-sessions" ;;
+    --project=*) REPO_DIR="${arg#--project=}"; PROJECT_ARG=1 ;;
+    --session=*) SESSION="${arg#--session=}" ;;
+    -h|--help)
+      cat <<'HELP'
+cmux: flexible terminal workspace deck for coding agents + Hermes/OpenClaw operations
+
+Usage:
+  tmux-workbench                         create/attach integrated tmux-workbench session
+  tmux-workbench --no-attach             create/verify without attaching
+  tmux-workbench --reset                 rebuild the tmux-workbench layout, then attach
+  tmux-workbench --two-sessions          build tmux-workbench plus cmux-hermes bridge session
+  tmux-workbench --project=/path/repo    open the deck on a specific project root
+  tmux-workbench --session=name          use a custom tmux session name
+
+Companion context helper:
+  cctx                         inspect current cwd as a workspace context card
+  cctx /path/to/project        print exact tmux-workbench commands for that context
+
+Workspace model:
+  Left rail    project/session cards inspired by native tmux-workbench vertical tabs
+  Center       current working surface: editor, agent, browser, docs, API, review
+  Right/bottom contextual scratch terminals near command lists
+  Ops bridge   Hermes/OpenClaw mission sessions remain reachable without replacing them
+
+Windows:
+  0 hub       left rail + workspace overview + scratch terminal
+  1 editor    Neovim center surface + full-height learning rail using CMUX_NVIM_APPNAME, default nvim
+  2 project   cwd/project router, ports, docs, and directory-aware commands
+  3 browser   frontend test surface plus scratch terminal
+  4 agents    Agent Deck slots only (not Hermes/OpenClaw chat)
+  5 runway    git diff, test, build
+  6 review    diff/test gates before accept
+  7 obsidian  vault/project docs
+  8 missions  attach mission-hermes / mission-openclaw / cockpit-community
+  9 scratch   free terminals
+
+Navigation:
+  Ctrl-b w       picker
+  Ctrl-b 0-9     jump by bottom-bar page number
+  Ctrl-b arrows  move panes
+  Ctrl-b z       zoom
+  Ctrl-b d       detach safely
+
+Environment knobs:
+  CMUX_SESSION=cmux
+  CMUX_REPO_DIR=/path/to/repo
+  CMUX_TOPOLOGY=integrated|split-sessions
+  CMUX_NVIM_APPNAME=nvim
+  CMUX_BROWSER_URL=http://127.0.0.1:4173/
+  CMUX_GITHUB_REPO=DanDo385/hermes-cli-cockpit
+  CMUX_CONTEXT_PATH=/path/to/active/context
+  CMUX_CONTEXT_KIND=git-project|obsidian-vault|hermes-agent-source|openclaw
+  CMUX_CONTEXT_NAME='Human readable context card name'
+  CMUX_GUIDE_MODE=full|off
+  CMUX_USE_CCTX_STATE=1       # set 0 to ignore ~/.cache/.../cctx.env
+  OBSIDIAN_VAULT_PATH=$HOME/.hermes/workspace
+HELP
+      exit 0
+      ;;
+    *)
+      echo "cmux: unknown arg: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "$PROJECT_ARG" -eq 1 ]]; then
+  CONTEXT_PATH="$REPO_DIR"
+  CONTEXT_KIND="git-project"
+  CONTEXT_NAME="$(basename "$REPO_DIR")"
+fi
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "cmux: required command missing: $1" >&2
+    exit 1
+  fi
+}
+
+pane_cmd() {
+  local role="$1" page="${2:-$1}"
+  printf 'CMUX_SESSION=%q CMUX_TITLE=%q CMUX_REPO_DIR=%q CMUX_COCKPIT_ROOT=%q CMUX_COCKPIT_BIN_DIR=%q CMUX_NVIM_APPNAME=%q OBSIDIAN_VAULT_PATH=%q CMUX_BROWSER_URL=%q CMUX_GITHUB_REPO=%q CMUX_TOPOLOGY=%q CMUX_CONTEXT_PATH=%q CMUX_CONTEXT_KIND=%q CMUX_CONTEXT_NAME=%q CMUX_GUIDE_MODE=%q CMUX_CONTEXT_STATE_FILE=%q %q %q %q' \
+    "$SESSION" "$TITLE" "$REPO_DIR" "$COCKPIT_ROOT" "$SCRIPT_DIR" "$NVIM_APPNAME_VALUE" "$VAULT" "${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}" "${CMUX_GITHUB_REPO:-DanDo385/hermes-cli-cockpit}" "$TOPOLOGY" "$CONTEXT_PATH" "$CONTEXT_KIND" "$CONTEXT_NAME" "$GUIDE_MODE" "$STATE_FILE" "$PANE" "$role" "$page"
+}
+
+set_pane_title() {
+  tmux select-pane -t "$1" -T "$2" >/dev/null 2>&1 || true
+}
+
+setup_tmux_options() {
+  tmux set-option -t "$SESSION" status on >/dev/null
+  tmux set-option -t "$SESSION" status-position bottom >/dev/null
+  tmux set-option -t "$SESSION" status-left "#[bold] $TITLE #[fg=cyan]#I:#W #[default]" >/dev/null
+  tmux set-option -t "$SESSION" status-right '#[fg=green]C-b w picker #[fg=yellow]C-b z zoom #[fg=cyan]C-b d detach #[fg=white]#H %H:%M' >/dev/null
+  tmux set-option -t "$SESSION" pane-border-status top >/dev/null
+  tmux set-option -t "$SESSION" pane-border-format ' #{pane_title} ' >/dev/null
+  tmux set-option -t "$SESSION" allow-set-title off >/dev/null
+  tmux set-option -t "$SESSION" set-titles on >/dev/null
+  tmux set-option -t "$SESSION" default-size 210x58 >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" automatic-rename off >/dev/null
+  tmux set-window-option -t "$SESSION" aggressive-resize on >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" pane-base-index 0 >/dev/null 2>&1 || true
+  tmux set-option -t "$SESSION" base-index 0 >/dev/null 2>&1 || true
+  tmux set-window-option -t "$SESSION" window-status-format ' #I:#W ' >/dev/null
+  tmux set-window-option -t "$SESSION" window-status-current-format '#[reverse] #I:#W #[default]' >/dev/null
+}
+
+refresh_env() {
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    [[ -n "${SSH_AUTH_SOCK:-}" ]] && tmux set-environment -t "$SESSION" SSH_AUTH_SOCK "$SSH_AUTH_SOCK" || true
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" OP_SERVICE_ACCOUNT_TOKEN "$OP_SERVICE_ACCOUNT_TOKEN" || true
+    [[ -n "${DISCORD_BOT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" DISCORD_BOT_TOKEN "$DISCORD_BOT_TOKEN" || true
+    [[ -n "${DISCORD_CHANNEL_ID:-}" ]] && tmux set-environment -t "$SESSION" DISCORD_CHANNEL_ID "$DISCORD_CHANNEL_ID" || true
+    tmux set-environment -t "$SESSION" CMUX_REPO_DIR "$REPO_DIR" || true
+    tmux set-environment -t "$SESSION" CMUX_COCKPIT_ROOT "$COCKPIT_ROOT" || true
+    tmux set-environment -t "$SESSION" CMUX_COCKPIT_BIN_DIR "$SCRIPT_DIR" || true
+    tmux set-environment -t "$SESSION" CMUX_TOPOLOGY "$TOPOLOGY" || true
+    tmux set-environment -t "$SESSION" CMUX_CONTEXT_PATH "$CONTEXT_PATH" || true
+    tmux set-environment -t "$SESSION" CMUX_CONTEXT_KIND "$CONTEXT_KIND" || true
+    tmux set-environment -t "$SESSION" CMUX_CONTEXT_NAME "$CONTEXT_NAME" || true
+    tmux set-environment -t "$SESSION" CMUX_BROWSER_URL "${CMUX_BROWSER_URL:-http://127.0.0.1:4173/}" || true
+    tmux set-environment -t "$SESSION" CMUX_CONTEXT_STATE_FILE "$STATE_FILE" || true
+    tmux set-environment -t "$SESSION" OBSIDIAN_VAULT_PATH "$VAULT" || true
+  fi
+}
+
+add_guide() {
+  local target="$1" page="$2" guide
+  [[ "$GUIDE_MODE" == "off" ]] && return 0
+  guide="$(tmux split-window -v -l 11 -t "$target" -P -F '#{pane_id}' "$(pane_cmd guide "$page")")"
+  set_pane_title "$guide" "Shortcuts for $page"
+}
+
+add_context_scratch() {
+  local target="$1" page="$2" scratch
+  scratch="$(tmux split-window -h -l 52 -t "$target" -P -F '#{pane_id}' "$(pane_cmd command-scratch "$page")")"
+  set_pane_title "$scratch" "Scratch terminal - $page"
+}
+
+new_page() {
+  local index="$1" name="$2" role="$3" title="$4" main
+  tmux new-window -t "$SESSION:$index" -n "$name" "$(pane_cmd "$role" "$name")"
+  main="$(tmux list-panes -t "$SESSION:$name" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "$title"
+  add_context_scratch "$main" "$name"
+  add_guide "$main" "$name"
+  tmux select-pane -t "$main" >/dev/null
+}
+
+new_hub_page() {
+  local rail center scratch guide
+  tmux new-session -d -s "$SESSION" -n hub "$(pane_cmd rail hub)"
+  setup_tmux_options
+  rail="$(tmux list-panes -t "$SESSION:hub" -F '#{pane_id}' | head -1)"
+  set_pane_title "$rail" "Workspace rail"
+  center="$(tmux split-window -h -t "$rail" -P -F '#{pane_id}' "$(pane_cmd hub hub)")"
+  set_pane_title "$center" "Workspace center"
+  scratch="$(tmux split-window -v -l 14 -t "$center" -P -F '#{pane_id}' "$(pane_cmd command-scratch hub)")"
+  set_pane_title "$scratch" "Scratch terminal - hub"
+  if [[ "$GUIDE_MODE" != "off" ]]; then
+    guide="$(tmux split-window -v -l 10 -t "$rail" -P -F '#{pane_id}' "$(pane_cmd guide hub)")"
+    set_pane_title "$guide" "Rail shortcuts"
+  fi
+  tmux select-pane -t "$center" >/dev/null
+}
+
+new_editor_page() {
+  local main scratch guide cmd
+  cmd="cd $(printf '%q' "$REPO_DIR") && export NVIM_APPNAME=$(printf '%q' "$NVIM_APPNAME_VALUE") && exec nvim ."
+  tmux new-window -t "$SESSION:1" -n editor "$cmd"
+  main="$(tmux list-panes -t "$SESSION:editor" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "Neovim editor - repo root"
+  if [[ "$GUIDE_MODE" != "off" ]]; then
+    if [[ -x "$SCRIPT_DIR/keystroke-mentor" ]]; then
+      local mentor_cmd
+      mentor_cmd="KEYSTROKE_MENTOR_STATE=${KEYSTROKE_MENTOR_STATE:-$HOME/.cache/hermes-tmux-workspaces/keystroke-mentor.json} $SCRIPT_DIR/keystroke-mentor --context nvim --watch --interval ${KEYSTROKE_MENTOR_INTERVAL:-30}"
+      guide="$(tmux split-window -h -l 52 -t "$main" -P -F '#{pane_id}' "$mentor_cmd")"
+      set_pane_title "$guide" "Nvim Keys | / search, gd def, K docs"
+    else
+      guide="$(tmux split-window -h -l 52 -t "$main" -P -F '#{pane_id}' "$(pane_cmd editor-guide editor)")"
+      set_pane_title "$guide" "Neovim learning rail"
+    fi
+  fi
+  scratch="$(tmux split-window -v -l 12 -t "$main" -P -F '#{pane_id}' "$(pane_cmd command-scratch editor)")"
+  set_pane_title "$scratch" "Command runway - editor"
+  tmux select-pane -t "$main" >/dev/null
+}
+
+new_agents_page() {
+  local board commands slot_a slot_b guide
+  tmux new-window -t "$SESSION:4" -n agents "$(pane_cmd agents agents)"
+  board="$(tmux list-panes -t "$SESSION:agents" -F '#{pane_id}' | head -1)"
+  set_pane_title "$board" "Agent Deck board - live inventory"
+
+  commands="$(tmux split-window -h -l 58 -t "$board" -P -F '#{pane_id}' "$(pane_cmd command-scratch agents)")"
+  set_pane_title "$commands" "Agent commands - copy/edit/run"
+
+  slot_a="$(tmux split-window -v -p 38 -t "$board" -P -F '#{pane_id}' "$(pane_cmd scratch agent-slot-a)")"
+  set_pane_title "$slot_a" "Agent slot A - assign worktree first"
+
+  slot_b="$(tmux split-window -v -p 38 -t "$commands" -P -F '#{pane_id}' "$(pane_cmd scratch agent-slot-b)")"
+  set_pane_title "$slot_b" "Agent slot B - assign worktree first"
+
+  if [[ "$GUIDE_MODE" != "off" ]]; then
+    guide="$(tmux split-window -v -l 9 -t "$slot_a" -P -F '#{pane_id}' "$(pane_cmd guide agents)")"
+    set_pane_title "$guide" "Agent Deck shortcuts"
+  fi
+
+  tmux select-pane -t "$board" >/dev/null
+}
+
+new_scratch_page() {
+  local main a b c
+  tmux new-window -t "$SESSION:9" -n scratch "$(pane_cmd scratch shell-a)"
+  main="$(tmux list-panes -t "$SESSION:scratch" -F '#{pane_id}' | head -1)"
+  set_pane_title "$main" "Scratch A - repo shell"
+  a="$(tmux split-window -h -t "$main" -P -F '#{pane_id}' "$(pane_cmd scratch shell-b)")"
+  set_pane_title "$a" "Scratch B - experiments"
+  b="$(tmux split-window -v -t "$a" -P -F '#{pane_id}' "$(pane_cmd scratch shell-c)")"
+  set_pane_title "$b" "Scratch C - logs/tests"
+  if [[ "$GUIDE_MODE" != "off" ]]; then
+    c="$(tmux split-window -v -l 10 -t "$main" -P -F '#{pane_id}' "$(pane_cmd guide scratch)")"
+    set_pane_title "$c" "Scratch shortcuts"
+  fi
+  tmux select-pane -t "$main" >/dev/null
+}
+
+build_session() {
+  new_hub_page
+  new_editor_page
+  new_page 2 project project "Project/CWD router"
+  new_page 3 browser browser "Browser testing surface"
+  new_agents_page
+  new_page 5 runway runway "Runway | git diff, test, build"
+  new_page 6 review review "Review | diff, test, then accept"
+  new_page 7 obsidian obsidian "Obsidian vault + project docs"
+  new_page 8 missions missions "Mission controls | Hermes + OpenClaw attach"
+  new_scratch_page
+  tmux select-window -t "$SESSION:0"
+}
+
+build_split_sessions() {
+  local hermes_session="${SESSION}-hermes"
+  local reset_args=()
+  if [[ "$RESET" -eq 1 ]]; then
+    reset_args=(--reset)
+  fi
+  CMUX_SESSION="$SESSION" CMUX_TOPOLOGY="integrated" "$0" --no-attach "${reset_args[@]}" --project="$REPO_DIR"
+  CMUX_SESSION="$hermes_session" CMUX_TITLE="CMUX Hermes Bridge" CMUX_TOPOLOGY="integrated" "$0" --no-attach "${reset_args[@]}" --project="$REPO_DIR"
+  echo "cmux: split-sessions ready"
+  echo "  code/workbench: tmux attach -d -t $SESSION"
+  echo "  hermes bridge:   tmux attach -d -t $hermes_session"
+}
+
+require tmux
+require nvim
+require zsh
+chmod +x "$PANE" >/dev/null 2>&1 || true
+require "$PANE"
+
+if [[ "$TOPOLOGY" == "split-sessions" ]]; then
+  build_split_sessions
+  if [[ "$NO_ATTACH" -eq 0 ]]; then
+    exec tmux attach -d -t "$SESSION"
+  fi
+  exit 0
+fi
+
+if [[ "$RESET" -eq 1 ]] && tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux kill-session -t "$SESSION"
+fi
+
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  build_session
+else
+  setup_tmux_options
+fi
+refresh_env
+
+if [[ "$NO_ATTACH" -eq 1 ]]; then
+  echo "cmux: session ready: $SESSION"
+  tmux list-windows -t "$SESSION" -F '#{window_index}: #{window_name} panes=#{window_panes}'
+  echo "Attach: tmux attach -d -t $SESSION"
+  echo "Navigate: Ctrl-b w picker, Ctrl-b 0-9 direct pages, Ctrl-b z zoom, Ctrl-b d detach"
+else
+  exec tmux attach -d -t "$SESSION"
+fi

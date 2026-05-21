@@ -24,17 +24,21 @@ Usage:
   mission-openclaw            create/attach OpenClaw mission control
   mission-openclaw --reset    rebuild layout
 
+Hermes and OpenClaw share the same mission-control shape. Each runtime owns its
+conversation, sessions, models, tools, auth, notes, ops, and command sheet.
+OpenClaw shows unsupported/not configured where a Hermes-equivalent is missing.
+
 Windows:
-  0 chat       main AI CLI/TUI chat
-  1 overview   health, URLs, process summary
-  2 gateway    gateway status/control hints
-  3 cron       scheduler/jobs
-  4 sessions   stored sessions/processes
-  5 heartbeat  heartbeat/system events
-  6 ports      port ownership and registry
-  7 secrets    1Password/SSH readiness, no secret values
-  8 logs       detailed runtime logs
-  9 scratch    shell
+  0 chat       main AI CLI/TUI conversation (Hermes | or OpenClaw |)
+  1 sessions   list, browse, continue, resume, export where supported
+  2 models     default, delegation, auxiliary, cron routes
+  3 tools      tools, skills, MCP list/test/status
+  4 secrets    1Password/SSH readiness, no raw secret values
+  5 notes      Obsidian vault / runbooks at ~/.hermes/workspace
+  6 gateway    gateway health + control hints
+  7 cron       scheduler, latest job output
+  8 ops        logs, ports, processes, launchd/service health
+  9 command-sheet    command sheet shell
 
 Navigation:
   Ctrl-b w      picker
@@ -97,7 +101,15 @@ refresh_env() {
 add_guide() {
   local target="$1" page="$2" guide
   guide="$(tmux split-window -v -l 12 -t "$target" -P -F '#{pane_id}' "$(pane_cmd guide "$page")")"
-  set_pane_title "$guide" "Shortcuts for $page"
+  set_pane_title "$guide" "Command sheet hints - $page"
+}
+
+agent_prefix() {
+  if [[ "$AGENT" == "openclaw" ]]; then
+    printf 'OpenClaw'
+  else
+    printf 'Hermes'
+  fi
 }
 
 new_page() {
@@ -115,16 +127,18 @@ new_page() {
 }
 
 build_session() {
-  new_page 0 chat chat "$AGENT chat/TUI - type here"
-  new_page 1 overview overview "Overview + URLs + process baseline"
-  new_page 2 gateway gateway "Gateway status + control hints"
-  new_page 3 cron cron "Cron scheduler + jobs"
-  new_page 4 sessions sessions "Sessions + process cleanup hints"
-  new_page 5 heartbeat heartbeat "Heartbeat/system events"
-  new_page 6 ports ports "Port registry + listeners"
-  new_page 7 secrets secrets "1Password/SSH readiness, no secret values"
-  new_page 8 logs logs "Detailed runtime logs"
-  new_page 9 scratch scratch "Scratch shell"
+  local p
+  p="$(agent_prefix)"
+  new_page 0 chat chat "$p | conversation - type here"
+  new_page 1 sessions sessions "$p Sessions | list, browse, continue"
+  new_page 2 models models "$p Models | default, aux, cron routes"
+  new_page 3 tools tools "$p Tools | tools, skills, MCPs"
+  new_page 4 secrets secrets "$p 1Password | no raw secrets"
+  new_page 5 notes notes "$p Notes | vault runbooks"
+  new_page 6 gateway gateway "$p Ops | gateway health"
+  new_page 7 cron cron "$p Ops | cron + latest output"
+  new_page 8 ops ops "$p Ops | logs, ports, launchd"
+  new_page 9 command-sheet command-sheet "$p Commands | operator sheet"
   tmux select-window -t "$SESSION:0"
 }
 
@@ -150,7 +164,7 @@ fi
 refresh_env
 
 if [[ "$NO_ATTACH" -eq 1 ]]; then
-  echo "mission-agent: session ready: $SESSION"
+  echo "mission-agent: session ready: $SESSION ($AGENT mission control)"
   tmux list-windows -t "$SESSION" -F '#{window_index}: #{window_name} panes=#{window_panes}'
   echo "Attach: tmux attach -d -t $SESSION"
   echo "Navigate: Ctrl-b w picker, Ctrl-b 0-9 direct pages, Ctrl-b z zoom, Ctrl-b d detach"

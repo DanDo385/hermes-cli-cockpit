@@ -25,7 +25,7 @@ DEFAULT_CONFIG = ROOT / "config" / "cockpit-workspaces.toml"
 def _simple_toml_value(raw: str) -> object:
     """Parse the small TOML subset used by cockpit-workspaces.toml.
 
-    This fallback exists for iMac system Python builds older than 3.11, where
+    This fallback exists for macOS system Python builds older than 3.11, where
     stdlib tomllib is unavailable. It intentionally supports only the registry
     shape we own here: quoted strings, integers, and arrays of quoted strings.
     """
@@ -81,13 +81,61 @@ def workspaces(cfg: dict) -> list[dict]:
     return sorted(cfg.get("workspace", []), key=lambda w: int(w.get("number", 999)))
 
 
+WORKSPACE_ALIASES = {
+    "code": "coding-workbench",
+    "workbench": "coding-workbench",
+    "oss": "open-source-radar",
+    "oss-radar": "open-source-radar",
+    "community": "open-source-radar",
+    "radar": "open-source-radar",
+}
+
+
 def find_workspace(cfg: dict, ident: str) -> dict:
-    ident = ident.lower()
+    ident = ident.lower().strip()
+    ident = WORKSPACE_ALIASES.get(ident, ident)
     for ws in workspaces(cfg):
-        if ident in {str(ws.get("id", "")).lower(), str(ws.get("number", "")), str(ws.get("title", "")).lower()}:
+        ws_id = str(ws.get("id", "")).lower()
+        if ident in {ws_id, str(ws.get("number", "")), str(ws.get("title", "")).lower()}:
+            return ws
+        if ident.replace(" ", "") in ws_id.replace("-", ""):
             return ws
     known = ", ".join(f"{w.get('number')}:{w.get('id')}" for w in workspaces(cfg))
     raise SystemExit(f"unknown workspace {ident!r}; known: {known}")
+
+
+def cmd_verify(_: argparse.Namespace, cfg: dict) -> int:
+    ws_list = workspaces(cfg)
+    if len(ws_list) != 5:
+        raise SystemExit(f"registry must have exactly 5 workspaces, found {len(ws_list)}")
+    by_id = {str(w.get("id")): w for w in ws_list}
+    required = {
+        "hermes": "Hermes Tool / Hermes CLI Mission Control",
+        "openclaw": "OpenClaw Tool / OpenClaw CLI Mission Control",
+        "coding-workbench": "Coding Workbench",
+        "agent-deck": "Agent Deck",
+        "open-source-radar": "Open Source Radar / Community",
+    }
+    for wid, title in required.items():
+        if wid not in by_id:
+            raise SystemExit(f"missing workspace id: {wid}")
+        if by_id[wid].get("title") != title:
+            raise SystemExit(f"workspace {wid} title mismatch: {by_id[wid].get('title')!r}")
+    if by_id["hermes"].get("remote_tmux_session") != "mission-hermes":
+        raise SystemExit("hermes must use tmux session mission-hermes")
+    if by_id["openclaw"].get("remote_tmux_session") != "mission-openclaw":
+        raise SystemExit("openclaw must use tmux session mission-openclaw")
+    if by_id["coding-workbench"].get("remote_tmux_session") != "cockpit-workbench":
+        raise SystemExit("coding-workbench must use tmux session cockpit-workbench")
+    agents = by_id["agent-deck"].get("remote_tmux_session", "")
+    if "agents" not in agents:
+        raise SystemExit("agent-deck must target cockpit-workbench:agents")
+    if by_id["open-source-radar"].get("remote_tmux_session") != "cockpit-community":
+        raise SystemExit("open-source-radar must use tmux session cockpit-community")
+    print("cockpit-workspaces verify: OK (5 peer surfaces)")
+    for w in ws_list:
+        print(f"  {w.get('number')}. {w.get('id')} -> {w.get('remote_tmux_session')}")
+    return 0
 
 
 def run_readonly(cmd: list[str]) -> tuple[int, str]:
@@ -150,7 +198,7 @@ def cmux_available() -> str:
 
 def print_header(cfg: dict) -> None:
     topo = cfg.get("topology", {})
-    print("Hermes CLI Cockpit workspace plan")
+    print("Hermes tmux Workspaces workspace plan")
     print("=" * 42)
     print(f"local visual client : {topo.get('local_visual_client')}")
     print(f"remote runtime      : {topo.get('remote_runtime')}")
@@ -199,10 +247,10 @@ def cmd_commands(args: argparse.Namespace, cfg: dict) -> int:
     print(f"# {ws.get('title')} command card")
     print("# Read-only unless you explicitly run one of these yourself.")
     print()
-    print("# Local iMac native cmux workspace shell")
+    print("# Local iMac native tmux-workbench workspace shell")
     print(f"cmux ssh {remote}")
     print()
-    print("# Remote MBP tmux attach inside that cmux SSH workspace")
+    print("# Remote MBP tmux attach inside that tmux-workbench SSH workspace")
     print(ws.get("attach_command"))
     print()
     print("# Browser targets to keep beside the workspace")
@@ -256,6 +304,19 @@ def cmd_commands(args: argparse.Namespace, cfg: dict) -> int:
         print()
         print("# Optional agent-deck wrapper if already installed")
         print("agent-deck")
+    if ws.get("id") == "open-source-radar":
+        print()
+        print("# OSS Radar launcher")
+        print("cockpit-community")
+        print("cockpit-community --reset")
+        print("bin/keystroke-mentor --context github --limit 8")
+        print("python3 scripts/post-discord-discussion.py --dry-run ...")
+    if ws.get("id") == "coding-workbench":
+        print()
+        print("# Coding Workbench — no merged Hermes/OpenClaw chat")
+        print("tmux-workbench --no-attach")
+        print("tmux attach -d -t cockpit-workbench")
+        print("bin/keystroke-mentor --context nvim --watch --interval 30")
     return 0
 
 
@@ -339,11 +400,12 @@ def sh_quote(value: str) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read-only Hermes CLI Cockpit workspace cards")
+    parser = argparse.ArgumentParser(description="Read-only Hermes tmux Workspaces workspace cards")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="workspace TOML config")
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("list", help="list the four cmux/tmux workspaces")
+    sub.add_parser("list", help="list the five cockpit workspaces")
+    sub.add_parser("verify", help="assert five-workspace registry invariants")
 
     show = sub.add_parser("show", help="show one workspace card")
     show.add_argument("workspace", help="workspace id, title, or number")
@@ -374,6 +436,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_inventory(args, cfg)
     if command == "env":
         return cmd_env(args, cfg)
+    if command == "verify":
+        return cmd_verify(args, cfg)
     parser.error(f"unknown command: {command}")
     return 2
 

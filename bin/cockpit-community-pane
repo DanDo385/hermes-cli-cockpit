@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROLE="${1:-projects}"
+PAGE="${2:-${ROLE}}"
+SESSION="${COCKPIT_SESSION:-cockpit-community}"
+TITLE="${COCKPIT_TITLE:-Open Source Radar / Community}"
+REPO_DIR="${COCKPIT_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
+GITHUB_REPO="${COCKPIT_GITHUB_REPO:-NousResearch/hermes-agent}"
+COCKPIT_HERMES_URL="${COCKPIT_HERMES_URL:-https://github.com/NousResearch/hermes-agent}"
+VAULT="${COCKPIT_VAULT:-$HOME/.hermes/workspace}"
+PROJECTS_CONFIG="${COCKPIT_PROJECTS_CONFIG:-$REPO_DIR/config/projects.toml}"
+
+hr() { printf '%*s\n' "${COLUMNS:-100}" '' | tr ' ' '-'; }
+header() {
+  clear || true
+  printf '%s :: %s\n' "$TITLE" "$1"
+  printf 'Session: %s   Repo: %s   Time: %s\n' "$SESSION" "$REPO_DIR" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+  hr
+  printf '\n'
+}
+loop() {
+  local t="$1" delay="$2"
+  shift 2
+  while true; do
+    header "$t"
+    "$@" 2>&1 || true
+    printf '\n'
+    hr
+    printf 'Refresh: every %ss   Draft-first posting only   Ctrl-b d detach\n' "$delay"
+    sleep "$delay"
+  done
+}
+
+show_guide() {
+  cat <<GUIDE
+OSS Radar / Community — workspace 5
+
+  0 projects       Projects | Hermes seed, add repos
+  1 github         Hermes GitHub | PRs, issues, commits
+  2 my-prs         My PRs | review, CI, merge state
+  3 discussions    Discussions | GitHub + Discord
+  4 contributions  Contributions | submitted, accepted
+  5 notes          vault notes + discussion drafts
+  6 command-sheet  operator command sheet
+
+Rule: no surprise posting. Draft locally, review, then explicit send/post.
+GUIDE
+}
+
+show_projects() {
+  printf 'Project registry (seed: Hermes)\n\n'
+  printf '  ✅ hermes-agent  %s\n' "$COCKPIT_HERMES_URL"
+  printf '     github slug: %s\n' "$GITHUB_REPO"
+  if [[ -f "$PROJECTS_CONFIG" ]]; then
+    printf '\nconfig/projects.toml entries:\n'
+    grep -E '^\[|path|github' "$PROJECTS_CONFIG" 2>/dev/null | sed 's/^/  /' || true
+  else
+    printf '\n  ⚪ %s missing — copy from config/projects.example.toml\n' "$PROJECTS_CONFIG"
+  fi
+  cat <<PROJ
+
+Add repos:
+  cp config/projects.example.toml config/projects.toml
+  # edit paths and github slugs
+
+Hermes mission control stays in mission-hermes — this workspace tracks OSS/community flow.
+PROJ
+}
+
+show_github() {
+  cd "$REPO_DIR"
+  printf 'Hermes GitHub | PRs, issues, commits\n'
+  printf '  Repo: %s\n\n' "$GITHUB_REPO"
+  if command -v gh >/dev/null 2>&1; then
+    gh repo view "$GITHUB_REPO" 2>&1 | sed -n '1,25p' || true
+    printf '\nOpen PRs\n'
+    gh pr list --repo "$GITHUB_REPO" --limit 15 2>&1 | sed 's/^/  /' || true
+    printf '\nRecent issues\n'
+    gh issue list --repo "$GITHUB_REPO" --limit 10 2>&1 | sed 's/^/  /' || true
+  else
+    printf '  gh missing — install GitHub CLI for live status\n'
+  fi
+}
+
+show_my_prs() {
+  printf 'My PRs | review, CI, merge state\n\n'
+  if command -v gh >/dev/null 2>&1; then
+    gh pr list --author "@me" --limit 20 2>&1 | sed 's/^/  /' || true
+    printf '\nPR checks (active repo)\n'
+    gh pr status --repo "$GITHUB_REPO" 2>&1 | sed 's/^/  /' || true
+  else
+    printf '  gh missing\n'
+  fi
+}
+
+show_discussions() {
+  printf 'Discussions | GitHub + Discord\n\n'
+  printf 'GitHub discussions/RFCs\n'
+  if command -v gh >/dev/null 2>&1; then
+    gh api "repos/$GITHUB_REPO/discussions" --jq '.[].title' 2>/dev/null | sed -n '1,15p' | sed 's/^/  /' || \
+      printf '  unsupported/not configured (enable GitHub Discussions or use gh web)\n'
+  fi
+  printf '\nDiscord (when configured)\n'
+  if [[ -n "${DISCORD_BOT_TOKEN:-}" && -n "${DISCORD_CHANNEL_ID:-}" ]]; then
+    printf '  DISCORD_BOT_TOKEN: set (hidden)\n'
+    printf '  DISCORD_CHANNEL_ID: set\n'
+    printf '  Dry-run: python3 scripts/post-discord-discussion.py --channel-id "$DISCORD_CHANNEL_ID" --file docs/cmux.md --dry-run\n'
+  else
+    printf '  unsupported/not configured — set DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID in tmux env\n'
+  fi
+  cat <<DISC
+Draft workflow:
+  1. Write in Obsidian or docs/
+  2. Preview with --dry-run
+  3. Post only after explicit review
+DISC
+}
+
+show_contributions() {
+  printf 'Contributions | submitted, accepted\n\n'
+  printf 'Track in vault or config/projects.toml — no auto-posting.\n\n'
+  for note in \
+    "$VAULT/projects/hermes-cli-cockpit/contributions.md" \
+    "$VAULT/projects/hermes-cli-cockpit"; do
+    [[ -e "$note" ]] && printf '  ✅ %s\n' "$note" || printf '  ⚪ %s\n' "$note"
+  done
+}
+
+show_notes() {
+  printf 'OSS notes | vault + drafts\n\n'
+  printf 'Vault: %s\n' "$VAULT"
+  printf 'Hermes project notes: %s/projects/hermes-agent\n' "$VAULT"
+  [[ -e "$VAULT/projects/hermes-agent" ]] && printf '  ✅ exists\n' || printf '  ⚪ create for OSS tracking\n'
+  cat <<'NOTES'
+Draft discussions in vault before GitHub/Discord post.
+Public repo docs must stay sanitized — no tokens or private hostnames.
+NOTES
+}
+
+show_command_sheet() {
+  header "command sheet"
+  cat <<CMDS
+# Open Source Radar — draft-first commands
+gh repo view $GITHUB_REPO
+gh pr list --repo $GITHUB_REPO
+gh pr list --author @me
+gh issue list --repo $GITHUB_REPO
+python3 scripts/post-discord-discussion.py --dry-run ...
+
+# Hermes mission control (not community posting):
+tmux attach -d -t mission-hermes
+CMDS
+  cd "$REPO_DIR" 2>/dev/null || cd "$HOME"
+  exec zsh -l
+}
+
+open_scratch() {
+  show_command_sheet
+}
+
+case "$ROLE" in
+  guide) loop "guide" 60 show_guide ;;
+  projects) loop "projects" 30 show_projects ;;
+  github) loop "github" 20 show_github ;;
+  my-prs) loop "my-prs" 20 show_my_prs ;;
+  discussions) loop "discussions" 25 show_discussions ;;
+  contributions) loop "contributions" 45 show_contributions ;;
+  notes) loop "notes" 45 show_notes ;;
+  command-sheet|scratch) show_command_sheet ;;
+  *) printf 'Unknown cockpit-community-pane role: %s\n' "$ROLE" >&2; exit 2 ;;
+esac

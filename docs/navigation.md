@@ -26,25 +26,37 @@ Press `Ctrl-b`, release both keys, then press the next key.
 
 ## Window/page map
 
+Hermes and OpenClaw mission controls (mirrored layout, separate sessions):
+
 ```text
-Ctrl-b 0      chat       selected assistant CLI/TUI conversation
-Ctrl-b 1      overview   health, URLs, process summary
-Ctrl-b 2      gateway    gateway status/control hints
-Ctrl-b 3      cron       scheduler/jobs
-Ctrl-b 4      sessions   stored sessions/processes
-Ctrl-b 5      heartbeat  heartbeat/system events
-Ctrl-b 6      ports      local listeners + port registry
-Ctrl-b 7      secrets    safe 1Password/SSH readiness, no raw values
-Ctrl-b 8      logs       detailed runtime logs
-Ctrl-b 9      scratch    blank command shell
+Ctrl-b 0      chat       conversation (Hermes | or OpenClaw |)
+Ctrl-b 1      sessions   list, browse, continue, export
+Ctrl-b 2      models     default, aux, cron routes
+Ctrl-b 3      tools      tools, skills, MCPs
+Ctrl-b 4      secrets    1Password readiness, no raw secrets
+Ctrl-b 5      notes      vault runbooks
+Ctrl-b 6      gateway    gateway health
+Ctrl-b 7      cron       scheduler + latest output
+Ctrl-b 8      ops        logs, ports, launchd
+Ctrl-b 9      scratch    command sheet
 ```
 
-The mirrored sessions are:
+Coding Workbench (`cockpit-workbench`):
 
 ```text
-mission-hermes     tmux session mission-hermes
-mission-openclaw   tmux session mission-openclaw
-cmux               tmux session cmux
+Ctrl-b 4      agents     Agent Deck slots (not Hermes/OpenClaw chat)
+Ctrl-b 5      runway     git diff, test, build
+Ctrl-b 6      review     diff gates before accept
+Ctrl-b 8      missions   attach mission-hermes / mission-openclaw / cockpit-community
+```
+
+The mirrored mission sessions are:
+
+```text
+mission-hermes        Hermes CLI Mission Control
+mission-openclaw      OpenClaw CLI Mission Control
+cockpit-workbench     Coding Workbench
+cockpit-community     Open Source Radar / Community
 ```
 
 Every window includes a bottom shortcut pane. Use the numbers shown in the bottom tmux bar. If a live session predates a layout change, run `mission-hermes --reset` or `mission-openclaw --reset` to rebuild the cockpit pages.

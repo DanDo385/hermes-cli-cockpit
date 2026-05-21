@@ -149,12 +149,14 @@ WINDOWS
   1 editor    Neovim center surface
   2 project   cwd/project router and local docs
   3 browser   frontend/browser test surface
-  4 agents    coding agents + agent-deck orchestration
-  5 hermes    Hermes/OpenClaw sessions and bridges
-  6 github    PR status and architecture discussion workflow
+  4 agents    Agent Deck — one agent, one worktree (labeled slots)
+  5 runway    git diff, test, build command runway
+  6 review    diff review + test gates before accept
   7 obsidian  vault/project notes
-  8 discord   Discord API readiness and discussion drafts
+  8 missions  attach mission-hermes / mission-openclaw (peer runtimes, not merged chat)
   9 scratch   free build/test/recovery shells
+
+Boundary: Hermes/OpenClaw chat → mission-hermes / mission-openclaw. OSS/community → cockpit-community.
 
 THIS PAGE
 GUIDE
@@ -163,11 +165,11 @@ GUIDE
     editor) printf '  Neovim owns editing. Scratch pane is for nearby commands and tests.\n' ;;
     project) printf '  Directory-aware router: cwd, git, ports, docs, and local commands.\n' ;;
     browser) printf '  Run dev server in scratch, open/check URL from the main pane.\n' ;;
-    agents) printf '  Launch coding CLIs deliberately. Agent-deck becomes the orchestration board when installed.\n' ;;
-    hermes) printf '  Bridge into Hermes/OpenClaw mission sessions or spawn/resume Hermes CLI sessions.\n' ;;
-    github) printf '  Watch PR state and draft architecture discussion without surprise posting.\n' ;;
+    agents) printf '  Agent Deck slots: Claude, Codex, OpenCode, Goose, Cursor, Hermes-delegated, OpenClaw-delegated.\n' ;;
+    runway) printf '  Command runway: git diff, test, build — training wheels beside Neovim.\n' ;;
+    review) printf '  Diff review and test gates before accepting agent edits.\n' ;;
+    missions) printf '  Attach separate mission controls. Do not merge Hermes/OpenClaw conversation here.\n' ;;
     obsidian) printf '  Jump into vault notes. Keep private details out of public commits.\n' ;;
-    discord) printf '  Check API readiness. Posting requires explicit command/content/channel.\n' ;;
     scratch) printf '  Free shells. Use this for experiments and cleanup.\n' ;;
     *) printf '  General cmux workbench pane.\n' ;;
   esac
@@ -279,21 +281,20 @@ SESSION CARDS
   1  editor    Neovim center surface
   2  project   directory router
   3  browser   frontend test loop
-  4  agents    Codex / Claude / OpenCode / agent-deck
-  5  hermes    Hermes + OpenClaw bridge
-  6  github    repo + PRs + discussion
-  7  obsidian  vault notes
-  8  discord   API/dry-run posting
+  4  agents    Agent Deck slots (one agent, one worktree)
+  5  runway    git diff, test, build
+  6  review    diff gates before accept
+  7  obsidian  vault / project docs
+  8  missions  attach mission-hermes / mission-openclaw / cockpit-community
   9  scratch   loose terminals
 
 WORKSPACE TOPOLOGIES
-  One session:
-    cmux --reset
-    coding agent + Hermes bridge live inside one tmux session.
-
-  Two sessions:
-    cmux --two-sessions --reset
-    cmux is the coding workbench; cmux-hermes is a companion bridge.
+  Five cockpit surfaces on iMac cmux:
+    1 Hermes Mission Control   mission-hermes
+    2 OpenClaw Mission Control mission-openclaw
+    3 Coding Workbench         cockpit-workbench (this session)
+    4 Agent Deck               cockpit-workbench:agents
+    5 OSS Radar / Community    cockpit-community
 
 DIRECTORY IDEA
   The long-term target is a cwd-aware workspace:
@@ -338,8 +339,8 @@ Flexible foundation principles
 Current implementation
   - 10 windows, each with contextual scratch where commands are listed.
   - Hub uses left rail + center overview + scratch.
-  - Agents page tracks Codex, Claude, OpenCode, Hermes CLI, OpenClaw, agent-deck.
-  - Hermes page bridges mission-hermes and mission-openclaw.
+  - Agents page = Agent Deck slots only (Hermes/OpenClaw chat stays in mission controls).
+  - Missions page = attach pointers to peer mission sessions + cockpit-community.
   - Browser page supports frontend/manual smoke tests.
 
 Future native cmux migration
@@ -488,148 +489,102 @@ BROWSER
 }
 
 show_agents() {
-  printf 'CLI coding and orchestration tools\n'
+  printf 'Agent Deck | one agent, one worktree\n\n'
   present codex
   present claude
   present opencode
-  present hermes
-  present openclaw
   present agent-deck
   present agent-worktree
   present a2a-bridge
   present git
   present tmux
-  printf '\nAgent worktree inventory\n'
-  if [[ -x "$COCKPIT_BIN_DIR/agent-worktree" ]]; then
-    "$COCKPIT_BIN_DIR/agent-worktree" --repo "$REPO_DIR" list 2>&1 | sed 's/^/  /'
-  else
-    printf '  agent-worktree missing: %s/agent-worktree\n' "$COCKPIT_BIN_DIR"
+  printf '\nLabeled delegation slots (not merged assistant panes):\n'
+  printf '  Hermes-delegated coding  → mission-hermes or hermes --worktree\n'
+  printf '  OpenClaw-delegated coding → mission-openclaw\n'
+  printf '\nLive inventory\n'
+  if [[ -x "$COCKPIT_BIN_DIR/cockpit-workspaces" ]]; then
+    "$COCKPIT_BIN_DIR/cockpit-workspaces" inventory agent-deck 2>&1 | sed 's/^/  /'
   fi
-  printf '\nA2A local bridge card\n'
+  if [[ -x "$COCKPIT_BIN_DIR/agent-worktree" ]]; then
+    printf '\nAgent worktree inventory\n'
+    "$COCKPIT_BIN_DIR/agent-worktree" --repo "$REPO_DIR" list 2>&1 | sed 's/^/  /'
+  fi
   if [[ -x "$COCKPIT_BIN_DIR/a2a-bridge" ]]; then
+    printf '\nA2A local bridge card\n'
     "$COCKPIT_BIN_DIR/a2a-bridge" --repo "$REPO_DIR" agent-card 2>&1 | python3 -m json.tool 2>/dev/null | sed -n '1,60p' | sed 's/^/  /' || true
-  else
-    printf '  a2a-bridge missing: %s/a2a-bridge\n' "$COCKPIT_BIN_DIR"
   fi
   cat <<'AGENTS'
 
-Agent-deck research takeaways
-  agent-deck is a TUI command center for many AI coding sessions.
-  Its useful ideas for cmux:
-    - one visible board for all agents
-    - groups per project/session
-    - fork/resume sessions
-    - worktree-backed parallel agents
-    - status detection: running, waiting, failed, done
-    - MCP/skills/cost dashboards as operational panels
-
-Recommended use
-  codex      focused code edits, tests, repo tasks
-  claude     large refactors/reviews when available
-  opencode   alternative coding agent / review loop
-  hermes     tool-rich system/workflow agent and gateway-aware assistant
-  openclaw   sandboxed dev agent/runtime experiments
-  agent-deck orchestration dashboard if installed later
+Slots (launch exactly one agent per worktree):
+  Claude Code slot    claude
+  Codex slot          codex
+  OpenCode slot       opencode
+  Goose slot          goose          # when installed
+  Cursor CLI slot     cursor agent   # when installed
+  Hermes-delegated    hermes --worktree   # coding delegation only
+  OpenClaw-delegated  openclaw tui        # sandbox coding delegation only
 
 Launch patterns
-  agent-worktree list
-  agent-worktree create --slug short-task-name --agent codex --no-launch
-  a2a-bridge agent-card | python3 -m json.tool
-  printf '{"jsonrpc":"2.0","id":"1","method":"agent.listWorktrees","params":{}}' | a2a-bridge rpc | python3 -m json.tool
+  agent-worktree --repo "$REPO_DIR" list
+  agent-worktree --repo "$REPO_DIR" create --slug short-task-name --agent codex --no-launch
+  a2a-bridge --repo "$REPO_DIR" agent-card | python3 -m json.tool
 
-  # Launch exactly one agent in that worktree after review:
-  cd /Users/openclaw/Code/worktrees/<repo>-<slug>
-  codex        # or: claude / opencode / hermes --worktree
-
-  # Review before merge:
-  git status --short --branch
-  git diff --stat
-  git diff --check
-
-Safety model
-  1. Inspect diff before delegating.
-  2. Prefer one agent per git worktree for parallel edits.
-  3. Never let two agents patch the same files blindly.
-  4. Run tests before commit.
-  5. Do not paste secrets into agent prompts or visible tmux panes.
+Safety: one agent, one branch, one worktree. Review diffs before merge.
+  Do not paste secrets into agent prompts or visible tmux panes.
 AGENTS
 }
 
-show_hermes() {
-  printf 'Hermes/OpenClaw bridge\n'
-  printf '  This page is the explicit answer to: coding agent + Hermes, or coding agent and Hermes as two sessions.\n\n'
-  printf 'Live related tmux sessions\n'
-  tmux list-sessions -F '  #{session_name}: windows=#{session_windows} attached=#{session_attached} created=#{session_created_string}' 2>/dev/null | sed -n '/hermes/p;/openclaw/p;/cmux/p' || true
-  printf '\nHermes CLI readiness\n'
-  present hermes
-  present openclaw
-  present tmux
-  present sqlite3
-  cat <<'HERMES'
+show_runway() {
+  cd "$REPO_DIR"
+  printf 'Runway | git diff, test, build\n\n'
+  git status --short --branch 2>/dev/null | sed -n '1,20p' || true
+  printf '\n'
+  git diff --stat 2>/dev/null | sed -n '1,15p' || true
+  cat <<'RUNWAY'
 
-One-session model
-  cmux --reset
-  Use window 4 for coding agents and this window for Hermes/OpenClaw bridge commands.
-  Good when one human is steering and wants everything in one tmux session.
-
-Two-session model
-  cmux --two-sessions --reset
-  Use one session for coding and one companion bridge for Hermes/OpenClaw.
-  Good when Hermes needs to persist separately from a coding-agent experiment.
-
-Attach existing mission sessions
-  tmux attach -d -t mission-hermes
-  tmux attach -d -t mission-openclaw
-
-Spawn/resume Hermes sessions
-  hermes
-  hermes --continue
-  hermes sessions list
-  hermes sessions browse
-  hermes --worktree
-
-Hermes one-shot examples
-  hermes chat -q "Review this repo architecture and suggest next implementation steps" --toolsets terminal,file
-  hermes chat -q "Summarize current gateway/cron health" --toolsets terminal,file
-
-OpenClaw boundary
-  Use OpenClaw as sandbox/dev by default.
-  Do not make OpenClaw a production launchd gateway unless explicitly chosen.
-HERMES
+Runway commands (copy to scratch pane):
+  git diff --check
+  git diff
+  npm test / npm run build / forge test — project dependent
+  ports --registry config/ports.toml
+RUNWAY
 }
 
-show_github() {
+show_review() {
   cd "$REPO_DIR"
-  printf 'GitHub target\n'
-  printf '  Repo: %s\n' "$GITHUB_REPO"
-  printf '  Remote: '
-  git remote get-url origin 2>/dev/null || true
-  printf '\nAuth/status\n'
-  if command -v gh >/dev/null 2>&1; then
-    gh auth status 2>&1 | sed 's/^/  /' || true
-    printf '\nPRs\n'
-    gh pr list --repo "$GITHUB_REPO" --limit 10 2>&1 | sed 's/^/  /' || true
-  else
-    printf '  gh missing\n'
-  fi
-  cat <<'GITHUB'
+  printf 'Review | diff, test, then accept\n\n'
+  git status --short --branch 2>/dev/null || true
+  printf '\n'
+  git diff --check 2>&1 | sed -n '1,20p' || true
+  cat <<'REV'
 
-Architecture discussion draft
-  Title: CMUX flexible workspace foundation: project cards, agent surfaces, and Hermes/OpenClaw bridge
-  Body bullets:
-    - The left rail should model project/session cards.
-    - Center surfaces should change by context: editor, agent, browser, PR, vault, API.
-    - Scratch terminals belong beside command lists.
-    - mission-hermes / mission-openclaw remain operational control surfaces.
-    - cmux is the code/review/test/discussion workbench.
-    - Browser, GitHub, Obsidian, and Discord panes make feedback loops visible.
-    - Agent orchestration uses worktrees, diff gates, and explicit handoffs.
+Accept gate checklist:
+  1. git diff --check clean
+  2. tests/build pass in runway pane
+  3. no raw secrets in diff
+  4. operator explicitly accepts agent edits
+REV
+}
 
-Commands when gh auth is healthy
-  gh repo view
-  gh pr status
-  gh issue create --title "CMUX flexible workspace foundation" --body-file docs/cmux.md
-GITHUB
+show_missions() {
+  printf 'Mission controls | peer AI runtimes (attach — do not merge here)\n\n'
+  printf 'Hermes Tool / Hermes CLI Mission Control\n'
+  printf '  tmux attach -d -t mission-hermes\n'
+  printf '  mission-hermes\n\n'
+  printf 'OpenClaw Tool / OpenClaw CLI Mission Control\n'
+  printf '  tmux attach -d -t mission-openclaw\n'
+  printf '  mission-openclaw\n\n'
+  printf 'Open Source Radar / Community\n'
+  printf '  tmux attach -d -t cockpit-community\n'
+  printf '  cockpit-community\n\n'
+  tmux list-sessions -F '  #{session_name}: windows=#{session_windows}' 2>/dev/null | \
+    sed -n '/mission-hermes/p;/mission-openclaw/p;/cockpit-community/p' || true
+  cat <<'M'
+
+Boundary:
+  Conversation, sessions, models, tools, auth, and ops for each runtime live in its mission session.
+  This Coding Workbench page only provides attach pointers — no shared-secret leakage.
+M
 }
 
 show_obsidian() {
@@ -761,33 +716,43 @@ CMDS
     agents)
       cat <<CMDS
 cd "$REPO_DIR"
+cockpit-workspaces inventory agent-deck
 agent-worktree --repo "$REPO_DIR" list
 agent-worktree --repo "$REPO_DIR" create --slug short-task-name --agent codex --no-launch
 a2a-bridge --repo "$REPO_DIR" agent-card | python3 -m json.tool
-printf '{"jsonrpc":"2.0","id":"1","method":"agent.listWorktrees","params":{}}' | a2a-bridge --repo "$REPO_DIR" rpc | python3 -m json.tool
-cd /Users/openclaw/Code/worktrees/$(basename "$REPO_DIR")-short-task-name
-codex        # or: claude / opencode / hermes --worktree
+slug=short-task-name
+branch="agent/\$slug"
+worktree="/Users/openclaw/Code/worktrees/$(basename "$REPO_DIR")-\$slug"
+git worktree add -b "\$branch" "\$worktree" main
+cd "\$worktree"
+codex        # or: claude / opencode / hermes --worktree / openclaw tui
+CMDS
+      ;;
+    runway)
+      cat <<CMDS
+cd "$REPO_DIR"
 git status --short --branch
 git diff --stat
 git diff --check
+npm test 2>/dev/null || true
 CMDS
       ;;
-    hermes)
+    review)
+      cat <<CMDS
+cd "$REPO_DIR"
+git diff --check
+git diff
+git status --short --branch
+CMDS
+      ;;
+    missions)
       cat <<CMDS
 tmux attach -d -t mission-hermes
 tmux attach -d -t mission-openclaw
-hermes
-hermes --continue
-hermes sessions list
-CMDS
-      ;;
-    github)
-      cat <<CMDS
-cd "$REPO_DIR"
-gh repo view
-gh pr status
-git diff --check
-git push
+tmux attach -d -t cockpit-community
+mission-hermes
+mission-openclaw
+cockpit-community
 CMDS
       ;;
     obsidian)
@@ -795,12 +760,6 @@ CMDS
 nvim "$VAULT/projects/hermes-cli-cockpit"
 open "obsidian://open?vault=hermes&file=projects/hermes-cli-cockpit"
 cd "$VAULT" && pwd
-CMDS
-      ;;
-    discord)
-      cat <<CMDS
-cd "$REPO_DIR"
-python3 scripts/post-discord-discussion.py --channel-id "\$DISCORD_CHANNEL_ID" --file docs/cmux.md --dry-run
 CMDS
       ;;
     *)
@@ -851,10 +810,10 @@ case "$ROLE" in
   diff) loop 'Git diff/review' 8 show_diff ;;
   browser) loop 'Browser/test surface' 15 show_browser ;;
   agents) loop 'Agent orchestration' 15 show_agents ;;
-  hermes) loop 'Hermes/OpenClaw bridge' 15 show_hermes ;;
-  github) loop 'GitHub PR/discussion' 20 show_github ;;
+  runway) loop 'Command runway' 12 show_runway ;;
+  review) loop 'Diff review gates' 10 show_review ;;
+  missions) loop 'Mission control attach' 15 show_missions ;;
   obsidian) loop 'Obsidian vault' 20 show_obsidian ;;
-  discord) loop 'Discord discussion workflow' 20 show_discord ;;
   command-scratch) show_command_scratch ;;
   scratch) show_scratch ;;
   *)

@@ -112,16 +112,17 @@ Native cmux features we are using or designing around:
 
 ## First workspace model
 
-Default cockpit shape:
+Five peer cockpit surfaces — Hermes and OpenClaw are not merged:
 
 ```text
-1 Hermes Ops      native cmux workspace, SSH surface into MBP mission-hermes, vault/docs/browser surfaces nearby
-2 OpenClaw Ops    native cmux workspace, SSH surface into MBP mission-openclaw, OpenClaw browser/docs nearby
-3 Code Workbench  native cmux workspace for repo editing, browser testing, file/vault panels, agents
-4 Agent Deck      native cmux workspace for worktrees, agents, GitHub/Discord/community surfaces
+1 Hermes Tool / Hermes CLI Mission Control   mission-hermes
+2 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
+3 Coding Workbench                           cockpit-workbench
+4 Agent Orchestration / Agent Deck           cockpit-workbench:agents
+5 Open Source Radar / Community              cockpit-community
 ```
 
-Browser Lab and Community Lab are embedded surfaces, not default top-level workspaces unless Dan asks.
+OpenClaw missing Hermes-equivalent features show `unsupported/not configured` — panes stay visible.
 
 ## Manual blocker right now
 
