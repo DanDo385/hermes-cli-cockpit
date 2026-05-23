@@ -110,7 +110,7 @@ WINDOWS ($owner mission control — peer surface, not merged with Hermes/OpenCla
   6 gateway    $owner Ops | gateway health
   7 cron       $owner Ops | cron + latest output
   8 ops        $owner Ops | logs, ports, launchd
-  9 scratch    $owner Commands | operator sheet
+  9 command-sheet  $owner Commands | operator sheet
 
 THIS PAGE
 GUIDE

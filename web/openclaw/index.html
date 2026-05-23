@@ -3,39 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="OpenClaw Mission Control — sandbox dev gateway tmux cockpit">
   <title>OpenClaw Mission Control</title>
-  <style>
-    body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background: #100b1f; color: #f7e8ff; }
-    main { max-width: 980px; margin: 0 auto; padding: 32px; }
-    h1 { color: #f0abfc; }
-    a { color: #93c5fd; }
-    .card { border: 1px solid #4c1d95; border-radius: 12px; padding: 18px; margin: 16px 0; background: #1e1635; }
-    code, pre { background: #05020f; color: #e5e7eb; border-radius: 8px; padding: 2px 6px; }
-    pre { padding: 14px; overflow-x: auto; }
-    .warn { color: #fbbf24; }
-  </style>
+  <link rel="stylesheet" href="../mission.css">
 </head>
-<body>
+<body class="openclaw">
 <main>
-  <h1>OpenClaw Mission Control</h1>
-  <p>Sandboxed OpenClaw cockpit for optional MBP lab use. Default profile is <code>--dev</code>.</p>
+  <nav aria-label="Mission controls">
+    <ul class="site-nav">
+      <li><a href="../hermes/">Hermes</a></li>
+      <li><a href="./" aria-current="page">OpenClaw</a></li>
+    </ul>
+  </nav>
+
+  <h1>OpenClaw Mission Control <span class="badge">--dev</span></h1>
+  <p class="lead">Sandboxed OpenClaw cockpit for optional MBP lab use. Default profile is <code>--dev</code>.</p>
 
   <section class="card">
     <h2>Start / attach tmux</h2>
-    <pre>mission-openclaw
+    <pre><button type="button" class="copy-btn" data-copy>copy</button>mission-openclaw
 mission-openclaw --reset
 mission-openclaw --no-attach</pre>
   </section>
 
-  <section class="card">
+  <section class="card card warn-callout">
     <h2>Start OpenClaw dev gateway</h2>
-    <pre>openclaw --dev gateway run --port 19001 --bind loopback --auth none --allow-unconfigured --verbose --compact</pre>
+    <pre><button type="button" class="copy-btn" data-copy>copy</button>openclaw --dev gateway run \
+  --port 19001 --bind loopback --auth none \
+  --allow-unconfigured --verbose --compact</pre>
     <p class="warn">Loopback is safest. For direct tailnet exposure, use token auth. Do not expose <code>--auth none</code> broadly.</p>
   </section>
 
   <section class="card">
+    <h2>Static page vs live dashboard</h2>
+    <p>This cheat sheet: port <code>4174</code>. Live gateway UI after tunnel: <code>19001</code>.</p>
+  </section>
+
+  <section class="card">
     <h2>tmux navigation</h2>
-    <pre>Ctrl-b w      page picker
+    <pre><button type="button" class="copy-btn" data-copy>copy</button>Ctrl-b w      page picker
 Ctrl-b 0-9    jump to numbered page in bottom bar
 Ctrl-b arrows move panes
 Ctrl-b z      zoom current pane
@@ -47,7 +53,7 @@ Ctrl-b d      detach</pre>
     <p>OpenClaw web page default: <code>4174</code></p>
     <p>OpenClaw dev gateway: <code>19001</code></p>
     <p>OpenClaw browser-control: <code>19003</code></p>
-    <pre>ports
+    <pre><button type="button" class="copy-btn" data-copy>copy</button>ports
 port-who 4174
 port-who 19001
 openclaw --dev gateway status</pre>
@@ -56,11 +62,26 @@ openclaw --dev gateway status</pre>
   <section class="card">
     <h2>iMac over Tailscale</h2>
     <p>Static mission page:</p>
-    <pre>http://MBP_TAILSCALE_IP:4174/</pre>
+    <pre><button type="button" class="copy-btn" data-copy>copy</button>http://MBP_TAILSCALE_IP:4174/</pre>
     <p>Safer gateway dashboard path from iMac via SSH/Tailscale tunnel:</p>
-    <pre>ssh -N -L 19001:127.0.0.1:19001 -L 19003:127.0.0.1:19003 openclaw-mbp
+    <pre><button type="button" class="copy-btn" data-copy>copy</button>ssh -N -L 19001:127.0.0.1:19001 -L 19003:127.0.0.1:19003 openclaw-mbp
 # then open http://127.0.0.1:19001/ on iMac</pre>
   </section>
 </main>
+<script>
+document.querySelectorAll('.copy-btn').forEach((btn) => {
+  const pre = btn.parentElement;
+  btn.addEventListener('click', async () => {
+    const text = pre.innerText.replace(/^copy\n?/, '').trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'copied';
+      setTimeout(() => { btn.textContent = 'copy'; }, 1200);
+    } catch {
+      btn.textContent = 'select';
+    }
+  });
+});
+</script>
 </body>
 </html>

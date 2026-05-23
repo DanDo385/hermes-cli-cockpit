@@ -27,7 +27,8 @@ Windows:
   2 my-prs         Dan's PRs, review, CI, merge state
   3 discussions    GitHub + Discord drafts (no surprise posting)
   4 contributions  submitted / accepted tracking
-  5 scratch        free shell
+  5 notes          OSS notes in vault + drafts
+  6 command-sheet  draft-first operator commands
 
 Posting rule: draft-first. Explicit send/post only after review.
 HELP
@@ -50,7 +51,7 @@ require() {
 pane_cmd() {
   local role="$1" page="${2:-$1}"
   printf 'COCKPIT_SESSION=%q COCKPIT_TITLE=%q COCKPIT_REPO_DIR=%q COCKPIT_GITHUB_REPO=%q COCKPIT_VAULT=%q %q %q %q' \
-    "$SESSION" "$TITLE" "$REPO_DIR" "${COCKPIT_GITHUB_REPO:-DanDo385/hermes-cli-cockpit}" "${COCKPIT_VAULT:-$HOME/.hermes/workspace}" "$PANE" "$role" "$page"
+    "$SESSION" "$TITLE" "$REPO_DIR" "${COCKPIT_GITHUB_REPO:-NousResearch/hermes-agent}" "${COCKPIT_VAULT:-$HOME/.hermes/workspace}" "$PANE" "$role" "$page"
 }
 
 set_pane_title() {
@@ -100,10 +101,19 @@ build_session() {
   tmux select-window -t "$SESSION:0"
 }
 
+refresh_env() {
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    [[ -n "${SSH_AUTH_SOCK:-}" ]] && tmux set-environment -t "$SESSION" SSH_AUTH_SOCK "$SSH_AUTH_SOCK" || true
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" OP_SERVICE_ACCOUNT_TOKEN "$OP_SERVICE_ACCOUNT_TOKEN" || true
+  fi
+}
+
 require tmux
 require zsh
 chmod +x "$PANE" >/dev/null 2>&1 || true
 require "$PANE"
+
+refresh_env
 
 if [[ "$RESET" -eq 1 ]] && tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux kill-session -t "$SESSION"
@@ -113,6 +123,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   build_session
 else
   setup_tmux_options
+  refresh_env
 fi
 
 if [[ "$NO_ATTACH" -eq 1 ]]; then

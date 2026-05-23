@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROLE="${1:-hub}"
 PAGE="${2:-${ROLE}}"
-SESSION="${CMUX_SESSION:-cmux}"
+SESSION="${CMUX_SESSION:-cockpit-workbench}"
 TITLE="${CMUX_TITLE:-CMUX Agent Workbench}"
 REPO_DIR="${CMUX_REPO_DIR:-/Users/openclaw/Code/hermes-cli-cockpit}"
 COCKPIT_ROOT="${CMUX_COCKPIT_ROOT:-/Users/openclaw/Code/hermes-cli-cockpit}"
@@ -399,23 +399,26 @@ show_ops() {
   printf '  It references mission sessions instead of replacing them. Mission remains ops/control plane.\n\n'
 
   printf 'Live mission sessions\n'
-  tmux list-sessions -F '  #{session_name}: windows=#{session_windows} attached=#{session_attached} created=#{session_created_string}' 2>/dev/null | sed -n '/mission/p;/cmux/p' || true
+  tmux list-sessions -F '  #{session_name}: windows=#{session_windows} attached=#{session_attached} created=#{session_created_string}' 2>/dev/null | sed -n '/mission/p;/cockpit-workbench/p;/cockpit-community/p' || true
 
   cat <<'OPS'
 
 Attach commands
-  tmux attach -d -t mission-hermes      # Hermes production/stable cockpit
-  tmux attach -d -t mission-openclaw    # OpenClaw dev/sandbox cockpit
-  tmux attach -d -t cmux                # this coding workbench
+  tmux attach -d -t mission-hermes        # Hermes production/stable cockpit
+  tmux attach -d -t mission-openclaw      # OpenClaw dev/sandbox cockpit
+  tmux attach -d -t cockpit-workbench     # coding workbench (Neovim, git, tests)
+  tmux attach -d -t cockpit-community     # OSS radar (GitHub, Discord drafts)
 
 Safe rebuilds
-  mission-hermes --reset       # rebuild Hermes cockpit layout only
-  mission-openclaw --reset     # rebuild OpenClaw cockpit layout only
-  cmux --reset                 # rebuild coding workbench layout only
+  mission-hermes --reset         # rebuild Hermes cockpit layout only
+  mission-openclaw --reset       # rebuild OpenClaw cockpit layout only
+  tmux-workbench --reset         # rebuild coding workbench layout only
+  cockpit-community --reset      # rebuild OSS radar layout only
 
 Important boundary
   mission-* observes gateways, cron, ports, logs, heartbeat.
-  cmux edits code, reviews diffs, opens browser/test surfaces, and drafts discussions.
+  cockpit-workbench edits code, reviews diffs, and runs tests — not agent chat.
+  cockpit-community owns GitHub/Discord draft workflows (not workbench windows).
 OPS
 }
 

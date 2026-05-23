@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TARGET="${1:-$PWD}"
-SESSION="${CMUX_SESSION:-cmux}"
+SESSION="${CMUX_SESSION:-cockpit-workbench}"
 VAULT="${OBSIDIAN_VAULT_PATH:-$HOME/.hermes/workspace}"
 OPENCLAW_ROOT="${OPENCLAW_SOURCE:-$HOME/Code/openclaw}"
 STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hermes-cli-cockpit"
@@ -11,7 +11,7 @@ PRINT_ENV=0
 
 usage() {
   cat <<'HELP'
-cctx: context router for the cmux workspace deck
+cctx: context router for the coding workbench (cockpit-workbench tmux session)
 
 Usage:
   cctx                         inspect current directory

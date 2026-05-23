@@ -132,7 +132,7 @@ Navigation:
   Ctrl-b d       detach safely
 
 Environment knobs:
-  CMUX_SESSION=cmux
+  CMUX_SESSION=cockpit-workbench
   CMUX_REPO_DIR=/path/to/repo
   CMUX_TOPOLOGY=integrated|split-sessions
   CMUX_NVIM_APPNAME=nvim
@@ -199,8 +199,6 @@ refresh_env() {
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     [[ -n "${SSH_AUTH_SOCK:-}" ]] && tmux set-environment -t "$SESSION" SSH_AUTH_SOCK "$SSH_AUTH_SOCK" || true
     [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" OP_SERVICE_ACCOUNT_TOKEN "$OP_SERVICE_ACCOUNT_TOKEN" || true
-    [[ -n "${DISCORD_BOT_TOKEN:-}" ]] && tmux set-environment -t "$SESSION" DISCORD_BOT_TOKEN "$DISCORD_BOT_TOKEN" || true
-    [[ -n "${DISCORD_CHANNEL_ID:-}" ]] && tmux set-environment -t "$SESSION" DISCORD_CHANNEL_ID "$DISCORD_CHANNEL_ID" || true
     tmux set-environment -t "$SESSION" CMUX_REPO_DIR "$REPO_DIR" || true
     tmux set-environment -t "$SESSION" CMUX_COCKPIT_ROOT "$COCKPIT_ROOT" || true
     tmux set-environment -t "$SESSION" CMUX_COCKPIT_BIN_DIR "$SCRIPT_DIR" || true

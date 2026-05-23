@@ -179,12 +179,12 @@ Native cmux buttons on the iMac open SSH-backed tmux sessions on the MBP:
 +------------------+-------------------------------------+---------------------------------------------+
 | Hermes Ops        | mission-hermes                      | Hermes gateway, cron, logs, sessions       |
 | OpenClaw Ops      | mission-openclaw                    | OpenClaw gateway, lab/debug surfaces       |
-| Code Workbench    | cockpit-workbench                   | Neovim, tests, browser, agents, scratch    |
-| Agent Deck        | cockpit-workbench:agents            | agent slots, worktrees, OSS/community flow |
+| Code Workbench    | cockpit-workbench                   | Neovim, tests, browser, runway, scratch    |
+| Agent Deck        | cockpit-workbench:agents            | agent slots, worktrees, diff/test gates    |
 | Browser Surface   | cockpit-workbench:browser           | app previews and browser smoke checks      |
-| GitHub Review     | cockpit-workbench:github            | PRs, diffs, review/status checks           |
-| Obsidian Notes    | cockpit-workbench:obsidian          | vault/project note workflow                |
-| Discord Workflow  | cockpit-workbench:discord           | Discord/API readiness and draft/send flow  |
+| OSS Radar         | cockpit-community                   | project registry, GitHub + Discord drafts  |
+| GitHub Review     | cockpit-community:github            | PRs, diffs, review/status checks           |
+| Discord Workflow  | cockpit-community:discussions       | Discord/API readiness and draft/send flow  |
 +------------------+-------------------------------------+---------------------------------------------+
 ```
 
@@ -281,13 +281,16 @@ tmux attach -d -t cockpit-workbench
 tmux select-window -t cockpit-workbench:agents
 tmux attach -d -t cockpit-workbench
 
-# GitHub review.
-tmux select-window -t cockpit-workbench:github
-tmux attach -d -t cockpit-workbench
+# OSS Radar — full community session.
+tmux attach -d -t cockpit-community
 
-# Obsidian notes.
-tmux select-window -t cockpit-workbench:obsidian
-tmux attach -d -t cockpit-workbench
+# GitHub review (OSS Radar window).
+tmux select-window -t cockpit-community:github
+tmux attach -d -t cockpit-community
+
+# Discord / discussions drafts (OSS Radar window).
+tmux select-window -t cockpit-community:discussions
+tmux attach -d -t cockpit-community
 ```
 
 ### Safety and naming rules

@@ -1,0 +1,161 @@
+/* Shared mission-control static pages (Hermes + OpenClaw) */
+:root {
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --radius: 12px;
+  --warn: #fbbf24;
+  --link: #93c5fd;
+  --pre-bg: #020617;
+  --pre-fg: #e5e7eb;
+  --max-w: 980px;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-mono);
+  line-height: 1.55;
+}
+
+body.hermes {
+  --bg: #0b1020;
+  --fg: #d8f3ff;
+  --accent: #64ffda;
+  --card-bg: #111827;
+  --card-border: #243b53;
+  --nav-active-bg: #134e4a;
+  --nav-active-fg: #64ffda;
+}
+
+body.openclaw {
+  --bg: #100b1f;
+  --fg: #f7e8ff;
+  --accent: #f0abfc;
+  --card-bg: #1e1635;
+  --card-border: #4c1d95;
+  --nav-active-bg: #581c87;
+  --nav-active-fg: #f0abfc;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+a {
+  color: var(--link);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.site-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.site-nav a {
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  color: var(--fg);
+  font-size: 0.9rem;
+}
+
+.site-nav a[aria-current="page"] {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-fg);
+  border-color: var(--accent);
+}
+
+main {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+}
+
+h1 {
+  color: var(--accent);
+  font-size: 1.75rem;
+  margin: 0 0 8px;
+}
+
+.lead {
+  margin: 0 0 24px;
+  opacity: 0.92;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  margin-left: 8px;
+  vertical-align: middle;
+  color: var(--accent);
+}
+
+h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 12px;
+  letter-spacing: 0.02em;
+}
+
+.card {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin: 16px 0;
+  background: var(--card-bg);
+}
+
+.card.warn-callout {
+  border-left: 4px solid var(--warn);
+}
+
+pre {
+  position: relative;
+  background: var(--pre-bg);
+  color: var(--pre-fg);
+  border-radius: 8px;
+  padding: 14px 14px 14px 14px;
+  overflow-x: auto;
+  margin: 0;
+}
+
+code {
+  background: var(--pre-bg);
+  color: var(--pre-fg);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.copy-btn:hover {
+  border-color: var(--accent);
+}
+
+.warn {
+  color: var(--warn);
+}
