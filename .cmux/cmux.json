@@ -2,6 +2,11 @@
   "$schema": "https://cmux.com/schema/cmux.schema.json",
   "commands": [
     {
+      "name": "DanOS Home / Cockpit Overview",
+      "description": "Calm local cockpit overview: registry, tasks, agents, cmux/tmux readiness, and next actions.",
+      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/danos init --seed-workspaces >/dev/null && bin/danos home"
+    },
+    {
       "name": "Hermes Tool / Hermes CLI Mission Control",
       "description": "Peer AI assistant surface: conversation, sessions, models, tools, auth, notes, ops — not merged with OpenClaw.",
       "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'"
@@ -33,6 +38,15 @@
     }
   ],
   "actions": {
+    "danos.home": {
+      "type": "command",
+      "title": "DanOS Home",
+      "subtitle": "Cockpit overview: agents, tasks, workspaces, cmux/tmux readiness",
+      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/danos init --seed-workspaces >/dev/null && bin/danos home",
+      "target": "newTabInCurrentPane",
+      "confirm": false,
+      "keywords": ["danos", "home", "cockpit", "overview", "agents", "tasks"]
+    },
     "hermes.ops": {
       "type": "command",
       "title": "Hermes Mission Control",
@@ -54,7 +68,7 @@
     "cockpit.workspaceCards": {
       "type": "command",
       "title": "Workspace Cards",
-      "subtitle": "Show all five cockpit workspace cards",
+      "subtitle": "Show all six cockpit workspace cards",
       "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/cockpit-workspaces list",
       "target": "newTabInCurrentPane",
       "confirm": false,
@@ -140,6 +154,7 @@
         "cmux.newBrowser",
         "cmux.splitRight",
         "cmux.splitDown",
+        "danos.home",
         "hermes.ops",
         "openclaw.ops",
         "cockpit.workspaceCards",

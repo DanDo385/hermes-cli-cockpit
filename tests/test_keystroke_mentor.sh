@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$ROOT/.tmp-keystroke-mentor-test.json"
 export KEYSTROKE_MENTOR_STATE="$STATE"
 rm -f "$STATE"
+trap 'rm -f "$STATE"' EXIT
 
 assert_contains() {
   local haystack="$1" needle="$2"

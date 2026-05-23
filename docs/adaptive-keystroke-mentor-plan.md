@@ -1,21 +1,22 @@
 # Adaptive Keystroke Mentor Plan
 
-> Coding Workbench (workspace 3) training wheels: Neovim keybinding rail, command runway, and pane-title posture that teaches without blocking flow.
+> Coding Workbench (workspace 4) training wheels: Neovim keybinding rail, command runway, and pane-title posture that teaches without blocking flow.
 
 Checked: 2026-05-21
 
 ## Scope
 
-This plan applies to **Coding Workbench only**. Hermes and OpenClaw mission controls (workspaces 1–2) use tmux navigation drills; Agent Deck (4) uses worktree/review gates; OSS Radar (5) uses draft-first posting rules.
+This plan applies to **Coding Workbench only**. DanOS Home (workspace 1) is the calm overview; Hermes and OpenClaw mission controls (workspaces 2–3) use tmux navigation drills; Agent Deck (5) uses worktree/review gates; OSS Radar (6) uses draft-first posting rules.
 
-## Five cockpit surfaces (preserved)
+## Six cockpit surfaces (preserved)
 
 ```text
-1 Hermes Tool / Hermes CLI Mission Control   mission-hermes
-2 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
-3 Coding Workbench                           cockpit-workbench
-4 Agent Orchestration / Agent Deck           cockpit-workbench:agents
-5 Open Source Radar / Community              cockpit-community
+1 DanOS Home / Cockpit Overview              local danos registry/home
+2 Hermes Tool / Hermes CLI Mission Control   mission-hermes
+3 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
+4 Coding Workbench                           cockpit-workbench
+5 Agent Orchestration / Agent Deck           cockpit-workbench:agents
+6 Open Source Radar / Community              cockpit-community
 ```
 
 Hermes and OpenClaw are **peer** surfaces — never collapsed into one generic agent pane.
@@ -34,7 +35,7 @@ Hermes and OpenClaw are **peer** surfaces — never collapsed into one generic a
 
 1. **Context-aware rail** — `CMUX_GUIDE_MODE=full` shows the Neovim learning rail; set `CMUX_GUIDE_MODE=off` when muscle memory is sufficient.
 2. **Command runway** — scratch panes list copy/edit/run commands for the active page; main pane stays readable.
-3. **Progressive disclosure** — hub/rail documents five workspaces; missions window (8) only attaches pointers to mission controls — no merged chat.
+3. **Progressive disclosure** — hub/rail documents six workspaces; missions window (8) only attaches pointers to mission controls — no merged chat.
 4. **Keystroke drills** — guide panes include a three-step drill: picker → scratch → zoom → detach.
 
 ## Implementation hooks

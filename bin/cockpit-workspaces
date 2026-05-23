@@ -82,6 +82,8 @@ def workspaces(cfg: dict) -> list[dict]:
 
 
 WORKSPACE_ALIASES = {
+    "danos": "home",
+    "cockpit": "home",
     "code": "coding-workbench",
     "workbench": "coding-workbench",
     "oss": "open-source-radar",
@@ -106,10 +108,11 @@ def find_workspace(cfg: dict, ident: str) -> dict:
 
 def cmd_verify(_: argparse.Namespace, cfg: dict) -> int:
     ws_list = workspaces(cfg)
-    if len(ws_list) != 5:
-        raise SystemExit(f"registry must have exactly 5 workspaces, found {len(ws_list)}")
+    if len(ws_list) != 6:
+        raise SystemExit(f"registry must have exactly 6 workspaces, found {len(ws_list)}")
     by_id = {str(w.get("id")): w for w in ws_list}
     required = {
+        "home": "DanOS Home / Cockpit Overview",
         "hermes": "Hermes Tool / Hermes CLI Mission Control",
         "openclaw": "OpenClaw Tool / OpenClaw CLI Mission Control",
         "coding-workbench": "Coding Workbench",
@@ -121,6 +124,8 @@ def cmd_verify(_: argparse.Namespace, cfg: dict) -> int:
             raise SystemExit(f"missing workspace id: {wid}")
         if by_id[wid].get("title") != title:
             raise SystemExit(f"workspace {wid} title mismatch: {by_id[wid].get('title')!r}")
+    if by_id["home"].get("attach_command") != "bin/danos home":
+        raise SystemExit("home must use local DanOS home overview")
     if by_id["hermes"].get("remote_tmux_session") != "mission-hermes":
         raise SystemExit("hermes must use tmux session mission-hermes")
     if by_id["openclaw"].get("remote_tmux_session") != "mission-openclaw":
@@ -132,7 +137,7 @@ def cmd_verify(_: argparse.Namespace, cfg: dict) -> int:
         raise SystemExit("agent-deck must target cockpit-workbench:agents")
     if by_id["open-source-radar"].get("remote_tmux_session") != "cockpit-community":
         raise SystemExit("open-source-radar must use tmux session cockpit-community")
-    print("cockpit-workspaces verify: OK (5 peer surfaces)")
+    print("cockpit-workspaces verify: OK (6 cockpit surfaces)")
     for w in ws_list:
         print(f"  {w.get('number')}. {w.get('id')} -> {w.get('remote_tmux_session')}")
     return 0
@@ -404,8 +409,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="workspace TOML config")
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("list", help="list the five cockpit workspaces")
-    sub.add_parser("verify", help="assert five-workspace registry invariants")
+    sub.add_parser("list", help="list the six cockpit workspaces")
+    sub.add_parser("verify", help="assert six-workspace registry invariants")
 
     show = sub.add_parser("show", help="show one workspace card")
     show.add_argument("workspace", help="workspace id, title, or number")

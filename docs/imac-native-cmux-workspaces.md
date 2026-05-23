@@ -112,14 +112,15 @@ Native cmux features we are using or designing around:
 
 ## First workspace model
 
-Five peer cockpit surfaces — Hermes and OpenClaw are not merged:
+Six cockpit surfaces — Home is the overview, and Hermes/OpenClaw are not merged:
 
 ```text
-1 Hermes Tool / Hermes CLI Mission Control   mission-hermes
-2 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
-3 Coding Workbench                           cockpit-workbench
-4 Agent Orchestration / Agent Deck           cockpit-workbench:agents
-5 Open Source Radar / Community              cockpit-community
+1 DanOS Home / Cockpit Overview              local danos registry/home
+2 Hermes Tool / Hermes CLI Mission Control   mission-hermes
+3 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
+4 Coding Workbench                           cockpit-workbench
+5 Agent Orchestration / Agent Deck           cockpit-workbench:agents
+6 Open Source Radar / Community              cockpit-community
 ```
 
 OpenClaw missing Hermes-equivalent features show `unsupported/not configured` — panes stay visible.

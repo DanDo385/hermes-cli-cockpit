@@ -1,6 +1,6 @@
 # Hermes CLI Cockpit workspace registry (iMac cmux -> MBP tmux)
 #
-# Five peer cockpit surfaces — never collapse Hermes and OpenClaw into one generic agent pane.
+# Six cockpit surfaces — Home is the calm overview; never collapse Hermes and OpenClaw into one generic agent pane.
 
 [topology]
 local_visual_client = "iMac native cmux"
@@ -12,8 +12,20 @@ rule = "cmux is the local visual client; tmux is the remote persistence layer; l
 boundary_rule = "Hermes and OpenClaw are peer AI assistant/runtime surfaces. Missing OpenClaw features show unsupported/not configured — do not remove the pane."
 
 [[workspace]]
-id = "hermes"
+id = "home"
 number = 1
+title = "DanOS Home / Cockpit Overview"
+short_title = "DanOS Home"
+plane = "overview"
+remote_tmux_session = "local-danos-home"
+attach_command = "bin/danos home"
+primary_browser_target = "http://127.0.0.1:4180/"
+secondary_browser_target = "cmux native Files / Find / Tasks right-sidebar tools"
+notes = "Calm local overview: registry, active agents, tasks needing attention, cmux/tmux readiness, and next actions."
+
+[[workspace]]
+id = "hermes"
+number = 2
 title = "Hermes Tool / Hermes CLI Mission Control"
 short_title = "Hermes Mission Control"
 plane = "runtime-ops"
@@ -26,7 +38,7 @@ security = "Never print raw secrets. op whoami and vault metadata first; op read
 
 [[workspace]]
 id = "openclaw"
-number = 2
+number = 3
 title = "OpenClaw Tool / OpenClaw CLI Mission Control"
 short_title = "OpenClaw Mission Control"
 plane = "runtime-ops"
@@ -44,7 +56,7 @@ security = "Separate OpenClaw credentials from Hermes; no shared-secret leakage.
 
 [[workspace]]
 id = "coding-workbench"
-number = 3
+number = 4
 title = "Coding Workbench"
 short_title = "Coding Workbench"
 plane = "coding"
@@ -58,7 +70,7 @@ boundary_rule = "Assistant chat lives in mission-hermes or mission-openclaw only
 
 [[workspace]]
 id = "agent-deck"
-number = 4
+number = 5
 title = "Agent Deck"
 short_title = "Agent Deck"
 plane = "orchestration"
@@ -69,7 +81,7 @@ agent_slots = ["Claude Code", "Codex", "OpenCode", "Goose", "Cursor CLI", "Herme
 
 [[workspace]]
 id = "open-source-radar"
-number = 5
+number = 6
 title = "Open Source Radar / Community"
 short_title = "OSS Radar"
 plane = "community"

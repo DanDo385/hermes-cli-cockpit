@@ -289,12 +289,13 @@ SESSION CARDS
   9  scratch   loose terminals
 
 WORKSPACE TOPOLOGIES
-  Five cockpit surfaces on iMac cmux:
-    1 Hermes Mission Control   mission-hermes
-    2 OpenClaw Mission Control mission-openclaw
-    3 Coding Workbench         cockpit-workbench (this session)
-    4 Agent Deck               cockpit-workbench:agents
-    5 OSS Radar / Community    cockpit-community
+  Six cockpit surfaces on iMac cmux:
+    1 DanOS Home               local danos registry/home
+    2 Hermes Mission Control   mission-hermes
+    3 OpenClaw Mission Control mission-openclaw
+    4 Coding Workbench         cockpit-workbench (this session)
+    5 Agent Deck               cockpit-workbench:agents
+    6 OSS Radar / Community    cockpit-community
 
 DIRECTORY IDEA
   The long-term target is a cwd-aware workspace:

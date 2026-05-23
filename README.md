@@ -40,6 +40,15 @@ bin/mission-openclaw --no-attach
 bin/cctx
 bin/cockpit-workspaces verify
 bin/cockpit-workspaces list
+bin/danos init --seed-workspaces
+bin/danos home
+bin/danos cmux workspaces
+bin/danos cmux open-home --dry-run
+bin/danos cmux notify --title 'DanOS' --body 'Cockpit ready' --dry-run
+bin/danos cmux open-browser 'https://github.com/NousResearch/hermes-agent' --dry-run
+bin/danos pr war-room 123 --repo NousResearch/hermes-agent --dry-run
+bin/danos tasks create --title 'Review PR war room MVP' --project hermes
+bin/danos agents register --tool codex --task TASK-ID --workspace agent-deck
 bin/cockpit-workspaces show coding-workbench
 bin/cockpit-workspaces show open-source-radar
 bin/cockpit-workspaces inventory agent-deck
@@ -65,6 +74,7 @@ cmux                    # upstream native cmux on the iMac only; do not point th
 cctx                    # cwd/project/session context card for cmux
 cockpit-workspaces      # read-only iMac cmux -> MBP tmux workspace cards
 agent-worktree          # one-agent/one-branch/one-worktree slot manager
+danos                   # local SQLite registry for projects/tasks/agents/workspaces and cockpit status
 a2a-bridge              # local Agent Card + JSON-RPC stdio bridge
 browser-smoke           # local HTTP front-end/cockpit smoke checker
 mission-web-hermes      # static Hermes mission page, default port 4173
@@ -97,19 +107,22 @@ port-who 3000
 
 OpenClaw shows `unsupported/not configured` when a Hermes-equivalent feature is missing — the pane stays visible.
 
-## Five cockpit workspaces
+## Six cockpit workspaces
 
 ```text
-1 Hermes Tool / Hermes CLI Mission Control    mission-hermes
-2 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
-3 Coding Workbench                            cockpit-workbench (tmux-workbench)
-4 Agent Deck                                  cockpit-workbench:agents
-5 Open Source Radar / Community               cockpit-community
+1 DanOS Home / Cockpit Overview               local danos registry/home
+2 Hermes Tool / Hermes CLI Mission Control    mission-hermes
+3 OpenClaw Tool / OpenClaw CLI Mission Control mission-openclaw
+4 Coding Workbench                            cockpit-workbench (tmux-workbench)
+5 Agent Deck                                  cockpit-workbench:agents
+6 Open Source Radar / Community               cockpit-community
 ```
 
 ```bash
 bin/cockpit-workspaces verify
 bin/cockpit-workspaces list
+bin/danos init --seed-workspaces
+bin/danos home
 bin/cockpit-community --no-attach
 bin/keystroke-mentor --context nvim --watch --interval 30
 ```
@@ -153,6 +166,7 @@ This repo carries the iMac native-cmux layer:
 .cmux/cmux.json              project-local native cmux actions and buttons
 bin/imac-cmux-bootstrap      iMac-only install/check/reload/launch helper
 bin/cockpit-workspaces       read-only workspace cards for cmux -> tmux routing
+bin/danos                    local registry plus native cmux adapter and PR war-room launcher
 ```
 
 ### What the cmux buttons open
@@ -205,6 +219,30 @@ bin/cockpit-workspaces show code
 bin/cockpit-workspaces show agent-deck
 bin/cockpit-workspaces commands agent-deck
 bin/cockpit-workspaces inventory agent-deck
+```
+
+Useful DanOS/cmux adapter commands:
+
+```bash
+# Seed local registry, then show the DanOS workspace -> cmux action map.
+bin/danos init --seed-workspaces
+bin/danos cmux workspaces
+
+# Open DanOS Home via the native cmux action configured in .cmux/cmux.json.
+bin/danos cmux open-home
+
+# Send a native cmux notification. Use --dry-run while validating wiring.
+bin/danos cmux notify --title 'DanOS' --body 'Cockpit ready'
+
+# Open a URL in a native cmux browser surface.
+bin/danos cmux open-browser 'https://github.com/NousResearch/hermes-agent/pulls'
+
+# Send text to a discovered cmux surface. Surface IDs are ephemeral; discover before use.
+bin/danos cmux send surface:2 'Review this PR'
+
+# PR review cockpit: browser surface + notification, no comments/merges/posting.
+bin/danos pr war-room 123 --repo NousResearch/hermes-agent
+bin/danos pr war-room 123 --repo NousResearch/hermes-agent --dry-run
 ```
 
 ### If your visible terminal is SSH'd into the MBP

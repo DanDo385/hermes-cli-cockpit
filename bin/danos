@@ -1,0 +1,889 @@
+#!/usr/bin/env python3
+"""DanOS local cockpit registry and orchestration CLI.
+
+This is the durable control-plane seed for cmux + tmux + Neovim + agent
+worktree workflows. Default posture: local, inspectable, no surprise posting,
+no destructive process control.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    tomllib = None
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_WORKSPACE_CONFIG = ROOT / "config" / "cockpit-workspaces.toml"
+DEFAULT_STATE = Path(os.environ.get("DANOS_STATE", Path.home() / ".local" / "state" / "hermes-cli-cockpit" / "danos.sqlite3"))
+TASK_STATES = {"inbox", "planned", "assigned", "running", "needs-human", "in-review", "merged", "archived", "blocked", "failed"}
+AGENT_STATES = {"idle", "spawning", "running", "waiting-for-input", "blocked", "tests-failed", "needs-review", "done", "failed", "abandoned"}
+CMUX_ACTION_IDS = {
+    "home": "danos.home",
+    "hermes": "hermes.ops",
+    "openclaw": "openclaw.ops",
+    "coding-workbench": "code.workbench",
+    "agent-deck": "agent.deck",
+    "open-source-radar": "oss.radar",
+}
+CMUX_WORKSPACE_ORDER = {workspace_id: index for index, workspace_id in enumerate(CMUX_ACTION_IDS, start=1)}
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def slugify(value: str) -> str:
+    slug = value.strip().lower()
+    slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-._")
+    return slug or "item"
+
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def connect(path: Path) -> sqlite3.Connection:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            repo_path TEXT,
+            github TEXT,
+            url TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workspaces (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            plane TEXT,
+            remote_tmux_session TEXT,
+            attach_command TEXT,
+            primary_browser_target TEXT,
+            secondary_browser_target TEXT,
+            source TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            project_id TEXT,
+            state TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 3,
+            branch TEXT,
+            worktree_path TEXT,
+            pr_url TEXT,
+            discussion_url TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agents (
+            id TEXT PRIMARY KEY,
+            tool TEXT NOT NULL,
+            status TEXT NOT NULL,
+            task_id TEXT,
+            project_id TEXT,
+            workspace_id TEXT,
+            branch TEXT,
+            worktree_path TEXT,
+            surface_ref TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            subject TEXT,
+            message TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
+def dict_rows(rows) -> list[dict]:
+    return [dict(row) for row in rows]
+
+
+def emit_json(data: object) -> None:
+    print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def record_event(conn: sqlite3.Connection, kind: str, subject: str, message: str) -> None:
+    conn.execute("INSERT INTO events(ts, kind, subject, message) VALUES (?, ?, ?, ?)", (now(), kind, subject, message))
+    conn.commit()
+
+
+def simple_toml_value(raw: str) -> object:
+    raw = raw.strip()
+    if raw.startswith('"') and raw.endswith('"'):
+        return raw[1:-1]
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        return [simple_toml_value(part.strip()) for part in inner.split(",")]
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+def simple_toml_loads(text: str) -> dict:
+    cfg: dict = {}
+    current: dict | None = None
+    current_path: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "[[workspace]]":
+            current = {}
+            cfg.setdefault("workspace", []).append(current)
+            current_path = ["workspace"]
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current_path = stripped[1:-1].split(".")
+            cursor = cfg
+            for part in current_path:
+                cursor = cursor.setdefault(part, {})
+            current = cursor
+            continue
+        if "=" not in stripped or current is None:
+            continue
+        key, value = stripped.split("=", 1)
+        current[key.strip()] = simple_toml_value(value)
+    return cfg
+
+
+def load_toml(path: Path) -> dict:
+    text = path.expanduser().read_text(encoding="utf-8")
+    if tomllib is not None:
+        return tomllib.loads(text)
+    return simple_toml_loads(text)
+
+
+def seed_from_workspaces(conn: sqlite3.Connection, config_path: Path) -> dict:
+    cfg = load_toml(config_path)
+    ts = now()
+    workspace_count = 0
+    for ws in cfg.get("workspace", []):
+        wid = str(ws.get("id", "")).strip()
+        if not wid:
+            continue
+        conn.execute(
+            """
+            INSERT INTO workspaces(id, title, plane, remote_tmux_session, attach_command,
+                                   primary_browser_target, secondary_browser_target, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title=excluded.title,
+                plane=excluded.plane,
+                remote_tmux_session=excluded.remote_tmux_session,
+                attach_command=excluded.attach_command,
+                primary_browser_target=excluded.primary_browser_target,
+                secondary_browser_target=excluded.secondary_browser_target,
+                source=excluded.source,
+                updated_at=excluded.updated_at
+            """,
+            (
+                wid,
+                str(ws.get("title", wid)),
+                str(ws.get("plane", "")),
+                str(ws.get("remote_tmux_session", "")),
+                str(ws.get("attach_command", "")),
+                str(ws.get("primary_browser_target", "")),
+                str(ws.get("secondary_browser_target", "")),
+                str(config_path),
+                ts,
+                ts,
+            ),
+        )
+        workspace_count += 1
+
+    project_count = 0
+    seeds = cfg.get("project_registry", {})
+    if isinstance(seeds, dict):
+        for seed_id, seed in seeds.items():
+            if not isinstance(seed, dict):
+                continue
+            pid = str(seed.get("id", seed_id)).strip()
+            if not pid:
+                continue
+            conn.execute(
+                """
+                INSERT INTO projects(id, name, repo_path, github, url, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    repo_path=excluded.repo_path,
+                    github=excluded.github,
+                    url=excluded.url,
+                    notes=excluded.notes,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    pid,
+                    str(seed.get("name", pid)),
+                    str(seed.get("repo_path", "")),
+                    str(seed.get("github", "")),
+                    str(seed.get("url", "")),
+                    str(seed.get("notes", "")),
+                    ts,
+                    ts,
+                ),
+            )
+            project_count += 1
+    conn.commit()
+    record_event(conn, "seed", "workspaces", f"seeded {workspace_count} workspaces and {project_count} projects from {config_path}")
+    return {"workspaces": workspace_count, "projects": project_count, "config": str(config_path)}
+
+
+def official_cmux_path() -> str | None:
+    candidates = []
+    path = shutil.which("cmux")
+    if path:
+        try:
+            if Path(path).resolve() != (ROOT / "bin" / "cmux").resolve():
+                candidates.append(path)
+        except OSError:
+            candidates.append(path)
+    candidates.extend(
+        [
+            "/Applications/cmux.app/Contents/MacOS/cmux",
+            str(Path.home() / "Applications" / "cmux.app" / "Contents" / "MacOS" / "cmux"),
+        ]
+    )
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
+def run_readonly(cmd: list[str], timeout: int = 5) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+    except FileNotFoundError:
+        return 127, f"missing command: {cmd[0]}"
+    except subprocess.TimeoutExpired:
+        return 124, f"timeout: {' '.join(cmd)}"
+    return proc.returncode, proc.stdout.strip()
+
+
+def run_cmux(args: list[str], timeout: int = 10) -> tuple[int, str, list[str]]:
+    path = official_cmux_path()
+    if not path:
+        return 127, "official cmux binary not found or shadowed by repo helper", []
+    cmd = [path, *args]
+    code, out = run_readonly(cmd, timeout=timeout)
+    return code, out, cmd
+
+
+def format_cmd(args: list[str]) -> str:
+    return " ".join(sh_quote(part) if re.search(r"\s", part) else part for part in args)
+
+
+def github_repo_from_remote() -> str:
+    code, out = run_readonly(["git", "-C", str(ROOT), "remote", "get-url", "origin"], timeout=5)
+    if code != 0 or not out:
+        return ""
+    match = re.search(r"github\.com[:/]([^/]+/[^/.]+)(?:\.git)?$", out.strip())
+    return match.group(1) if match else ""
+
+
+def default_github_repo(conn: sqlite3.Connection) -> str:
+    row = conn.execute("SELECT github FROM projects WHERE github <> '' ORDER BY id LIMIT 1").fetchone()
+    if row and row["github"]:
+        return str(row["github"])
+    return github_repo_from_remote()
+
+
+def cmd_init(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    ensure_schema(conn)
+    result = {"state": str(args.state_path), "initialized": True}
+    if args.seed_workspaces:
+        result["seed"] = seed_from_workspaces(conn, Path(args.config))
+    if args.json:
+        emit_json(result)
+    else:
+        print("DanOS registry initialized")
+        print(f"  state: {args.state_path}")
+        if "seed" in result:
+            seed = result["seed"]
+            print(f"  seeded: {seed['workspaces']} workspaces, {seed['projects']} projects")
+    return 0
+
+
+def counts(conn: sqlite3.Connection) -> dict[str, int]:
+    out = {}
+    for table in ["projects", "workspaces", "tasks", "agents", "events"]:
+        out[table] = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+    return out
+
+
+def cmux_probe() -> dict:
+    path = official_cmux_path()
+    if not path:
+        return {"available": False, "path": None, "note": "official cmux binary not found or shadowed by repo helper"}
+    code, out = run_readonly([path, "list-workspaces", "--json"], timeout=5)
+    return {"available": True, "path": path, "list_workspaces_exit": code, "list_workspaces_output": out[:2000]}
+
+
+def tmux_probe() -> dict:
+    code, out = run_readonly(["tmux", "list-sessions", "-F", "#{session_name} windows=#{session_windows} attached=#{session_attached}"], timeout=5)
+    return {"exit": code, "sessions": out.splitlines() if code == 0 and out else [], "message": out if code != 0 else ""}
+
+
+def status_payload(conn: sqlite3.Connection) -> dict:
+    return {"state": str(DEFAULT_STATE), "counts": counts(conn), "cmux": cmux_probe(), "tmux": tmux_probe()}
+
+
+def cmd_status(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    data = status_payload(conn)
+    if args.json:
+        emit_json(data)
+        return 0
+    print("DanOS cockpit status")
+    print("====================")
+    print(f"state       {data['state']}")
+    for key, value in data["counts"].items():
+        print(f"{key:<11} {value}")
+    cmux = data["cmux"]
+    print(f"cmux        {'available' if cmux['available'] else 'missing'} {cmux.get('path') or ''}")
+    tmux = data["tmux"]
+    print(f"tmux        {len(tmux['sessions'])} sessions" if tmux["exit"] == 0 else f"tmux        unavailable: {tmux['message']}")
+    return 0
+
+
+def cmd_home(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    print("DanOS Home")
+    print("==========")
+    print("What is alive? What needs attention? Where do I go next?")
+    print()
+    cmd_status(argparse.Namespace(json=False), conn)
+    print()
+    print("Active / attention tasks")
+    rows = dict_rows(
+        conn.execute(
+            "SELECT id, state, priority, title, project_id FROM tasks WHERE state IN ('running','needs-human','blocked','in-review') ORDER BY priority, updated_at DESC LIMIT 10"
+        ).fetchall()
+    )
+    if not rows:
+        print("  none")
+    for row in rows:
+        print(f"  {row['id']:<24} {row['state']:<13} p{row['priority']} {row['title']} [{row.get('project_id') or '-'}]")
+    print()
+    print("Agents")
+    agents = dict_rows(conn.execute("SELECT id, tool, status, task_id, workspace_id FROM agents ORDER BY updated_at DESC LIMIT 10").fetchall())
+    if not agents:
+        print("  none registered")
+    for agent in agents:
+        print(f"  {agent['id']:<18} {agent['tool']:<12} {agent['status']:<18} task={agent.get('task_id') or '-'} workspace={agent.get('workspace_id') or '-'}")
+    print()
+    print("Next useful commands")
+    print("  bin/danos tasks create --title 'short task' --project hermes")
+    print("  bin/danos agents register --tool codex --task TASK-ID --workspace agent-deck")
+    print("  bin/danos workspaces list")
+    print("  bin/danos cmux probe")
+    return 0
+
+
+def cmd_seed(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    result = seed_from_workspaces(conn, Path(args.config))
+    if args.json:
+        emit_json(result)
+    else:
+        print(f"seeded {result['workspaces']} workspaces and {result['projects']} projects from {result['config']}")
+    return 0
+
+
+def cmd_projects_list(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    rows = dict_rows(conn.execute("SELECT * FROM projects ORDER BY id").fetchall())
+    if args.json:
+        emit_json(rows)
+        return 0
+    print("Projects")
+    if not rows:
+        print("  none")
+    for row in rows:
+        print(f"  {row['id']:<20} {row['name']:<24} {row.get('github') or row.get('repo_path') or '-'}")
+    return 0
+
+
+def cmd_projects_add(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    ts = now()
+    pid = args.id or slugify(args.name)
+    conn.execute(
+        "INSERT INTO projects(id, name, repo_path, github, url, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (pid, args.name, args.repo_path or "", args.github or "", args.url or "", args.notes or "", ts, ts),
+    )
+    conn.commit()
+    record_event(conn, "project.created", pid, args.name)
+    print(f"created project {pid}")
+    return 0
+
+
+def new_task_id(title: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"TASK-{stamp}-{slugify(title)[:24]}"
+
+
+def cmd_tasks_create(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    if args.task_state not in TASK_STATES:
+        raise SystemExit(f"invalid task state {args.task_state!r}; valid: {', '.join(sorted(TASK_STATES))}")
+    ts = now()
+    tid = args.id or new_task_id(args.title)
+    conn.execute(
+        """
+        INSERT INTO tasks(id, title, project_id, state, priority, branch, worktree_path, pr_url, discussion_url, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (tid, args.title, args.project or "", args.task_state, args.priority, args.branch or "", args.worktree or "", args.pr_url or "", args.discussion_url or "", args.notes or "", ts, ts),
+    )
+    conn.commit()
+    record_event(conn, "task.created", tid, args.title)
+    if args.json:
+        emit_json(dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()))
+    else:
+        print(f"created task {tid}")
+    return 0
+
+
+def cmd_tasks_list(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    params: list[object] = []
+    sql = "SELECT * FROM tasks"
+    if args.state:
+        sql += " WHERE state = ?"
+        params.append(args.state)
+    sql += " ORDER BY priority, updated_at DESC"
+    rows = dict_rows(conn.execute(sql, params).fetchall())
+    if args.json:
+        emit_json(rows)
+        return 0
+    print("Tasks")
+    if not rows:
+        print("  none")
+    for row in rows:
+        print(f"  {row['id']:<34} {row['state']:<13} p{row['priority']} {row['title']}")
+    return 0
+
+
+def cmd_agents_register(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    if args.status not in AGENT_STATES:
+        raise SystemExit(f"invalid agent status {args.status!r}; valid: {', '.join(sorted(AGENT_STATES))}")
+    ts = now()
+    aid = args.id or f"agent-{slugify(args.tool)}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    conn.execute(
+        """
+        INSERT INTO agents(id, tool, status, task_id, project_id, workspace_id, branch, worktree_path, surface_ref, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (aid, args.tool, args.status, args.task or "", args.project or "", args.workspace or "", args.branch or "", args.worktree or "", args.surface_ref or "", args.notes or "", ts, ts),
+    )
+    conn.commit()
+    record_event(conn, "agent.registered", aid, f"{args.tool} {args.status}")
+    if args.json:
+        emit_json(dict(conn.execute("SELECT * FROM agents WHERE id = ?", (aid,)).fetchone()))
+    else:
+        print(f"registered agent {aid}")
+    return 0
+
+
+def cmd_agents_list(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    rows = dict_rows(conn.execute("SELECT * FROM agents ORDER BY updated_at DESC").fetchall())
+    if args.json:
+        emit_json(rows)
+        return 0
+    print("Agents")
+    if not rows:
+        print("  none")
+    for row in rows:
+        print(f"  {row['id']:<24} {row['tool']:<12} {row['status']:<18} task={row.get('task_id') or '-'} workspace={row.get('workspace_id') or '-'}")
+    return 0
+
+
+def cmd_workspaces_list(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    rows = dict_rows(conn.execute("SELECT * FROM workspaces ORDER BY id").fetchall())
+    if args.json:
+        emit_json(rows)
+        return 0
+    print("Workspaces")
+    if not rows:
+        print("  none; run: bin/danos seed workspaces")
+    for row in rows:
+        print(f"  {row['id']:<22} {row['plane']:<15} {row['title']} -> {row.get('remote_tmux_session') or 'local'}")
+    return 0
+
+
+def cmux_workspace_payload(conn: sqlite3.Connection) -> list[dict]:
+    rows = dict_rows(conn.execute("SELECT * FROM workspaces").fetchall())
+    rows.sort(key=lambda row: (CMUX_WORKSPACE_ORDER.get(row["id"], 999), row["id"]))
+    payload = []
+    for row in rows:
+        payload.append(
+            {
+                "workspace_id": row["id"],
+                "title": row["title"],
+                "plane": row.get("plane") or "",
+                "action_id": CMUX_ACTION_IDS.get(row["id"], ""),
+                "tmux_target": row.get("remote_tmux_session") or "local",
+                "attach_command": row.get("attach_command") or "",
+                "primary_browser_target": row.get("primary_browser_target") or "",
+                "secondary_browser_target": row.get("secondary_browser_target") or "",
+            }
+        )
+    return payload
+
+
+def cmd_cmux_workspaces(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    rows = cmux_workspace_payload(conn)
+    if args.json:
+        emit_json(rows)
+        return 0
+    print("DanOS cmux workspace adapter")
+    print("============================")
+    if not rows:
+        print("  none; run: bin/danos init --seed-workspaces")
+    for row in rows:
+        action = row["action_id"] or "-"
+        print(f"  {row['workspace_id']:<20} {action:<18} {row['title']} -> {row['attach_command'] or row['tmux_target']}")
+    return 0
+
+
+def cmd_cmux_probe(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    data = cmux_probe()
+    if args.json:
+        emit_json(data)
+        return 0
+    print("cmux probe")
+    print("==========")
+    print(f"available: {data['available']}")
+    print(f"path:      {data.get('path') or '-'}")
+    if "list_workspaces_exit" in data:
+        print(f"list exit: {data['list_workspaces_exit']}")
+        if data.get("list_workspaces_output"):
+            print(data["list_workspaces_output"])
+    else:
+        print(data.get("note", ""))
+    return 0
+
+
+def cmd_cmux_open_home(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    cmux_args = ["action", "run", "danos.home"]
+    if args.dry_run:
+        print(f"cmux {format_cmd(cmux_args)}")
+        return 0
+    code, out, cmd = run_cmux(cmux_args)
+    if code != 0:
+        print(f"danos: cmux open-home failed: {out}", file=sys.stderr)
+        return code
+    if out:
+        print(out)
+    print("opened DanOS Home via cmux action danos.home")
+    record_event(conn, "cmux.open_home", "danos.home", format_cmd(cmd))
+    return 0
+
+
+def cmd_cmux_notify(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    cmux_args = ["notify", "--title", args.title, "--body", args.body]
+    if args.dry_run:
+        print(f"cmux {format_cmd(cmux_args)}")
+        return 0
+    code, out, cmd = run_cmux(cmux_args)
+    if code != 0:
+        print(f"danos: cmux notify failed: {out}", file=sys.stderr)
+        return code
+    if out:
+        print(out)
+    record_event(conn, "cmux.notify", args.title, args.body)
+    return 0
+
+
+def cmd_cmux_open_browser(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    browser_cmd = "open-split" if args.split else "open"
+    cmux_args = ["browser", browser_cmd, args.url]
+    if args.dry_run:
+        print(f"cmux {format_cmd(cmux_args)}")
+        return 0
+    code, out, cmd = run_cmux(cmux_args)
+    if code != 0:
+        print(f"danos: cmux open-browser failed: {out}", file=sys.stderr)
+        return code
+    if out:
+        print(out)
+    print(f"opened browser surface: {args.url}")
+    record_event(conn, "cmux.open_browser", args.url, format_cmd(cmd))
+    return 0
+
+
+def cmd_cmux_send(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    cmux_args = ["send", args.surface, args.text]
+    if args.dry_run:
+        print(f"cmux {format_cmd(cmux_args)}")
+        return 0
+    code, out, cmd = run_cmux(cmux_args)
+    if code != 0:
+        print(f"danos: cmux send failed: {out}", file=sys.stderr)
+        return code
+    if out:
+        print(out)
+    print(f"sent text to {args.surface}")
+    record_event(conn, "cmux.send", args.surface, args.text)
+    return 0
+
+
+def cmd_pr_war_room(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    repo = args.repo or default_github_repo(conn)
+    if not repo:
+        print("danos: --repo owner/name required when no GitHub project/remote is configured", file=sys.stderr)
+        return 2
+    pr_url = f"https://github.com/{repo}/pull/{args.pull_number}"
+    title = "DanOS PR War Room"
+    body = f"Ready: {repo}#{args.pull_number}"
+    browser_args = ["browser", "open", pr_url]
+    notify_args = ["notify", "--title", title, "--body", body]
+
+    print("DanOS PR War Room")
+    print("=================")
+    print(f"PR: {pr_url}")
+    print("Surfaces:")
+    print(f"  cmux {format_cmd(browser_args)}")
+    print(f"  cmux {format_cmd(notify_args)}")
+    print("Review loop:")
+    print("  1. Open PR browser surface")
+    print("  2. Check diff / files / CI")
+    print("  3. Capture notes into DanOS task or Agent Deck")
+    print("  4. No GitHub comments or merges without explicit command")
+
+    if args.dry_run:
+        return 0
+
+    code, out, cmd = run_cmux(browser_args)
+    if code != 0:
+        print(f"danos: PR browser open failed: {out}", file=sys.stderr)
+        return code
+    if out:
+        print(out)
+    code, out, cmd = run_cmux(notify_args)
+    if code != 0:
+        print(f"danos: PR notify failed: {out}", file=sys.stderr)
+        return code
+    if out:
+        print(out)
+    record_event(conn, "pr.war_room", f"{repo}#{args.pull_number}", pr_url)
+    print(f"opened PR War Room for {repo}#{args.pull_number}")
+    return 0
+
+
+def cmd_tmux_list(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    data = tmux_probe()
+    if args.json:
+        emit_json(data)
+        return 0
+    print("tmux sessions")
+    if data["exit"] != 0:
+        print(f"  unavailable: {data['message']}")
+    elif not data["sessions"]:
+        print("  none")
+    else:
+        for session in data["sessions"]:
+            print(f"  {session}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="DanOS local registry for cmux/tmux/agent cockpit workflows.")
+    parser.add_argument("--state", dest="state_path", default=str(DEFAULT_STATE), help="SQLite state path; env DANOS_STATE also supported")
+    parser.add_argument("--config", default=str(DEFAULT_WORKSPACE_CONFIG), help="cockpit workspace TOML config")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_init = sub.add_parser("init", help="initialize the local DanOS SQLite registry")
+    p_init.add_argument("--seed-workspaces", action="store_true", help="seed workspaces/projects from cockpit-workspaces.toml")
+    p_init.add_argument("--json", action="store_true")
+
+    p_status = sub.add_parser("status", help="show registry, cmux, and tmux status")
+    p_status.add_argument("--json", action="store_true")
+    sub.add_parser("home", help="print the DanOS Home overview")
+
+    p_seed = sub.add_parser("seed", help="seed registry data")
+    seed_sub = p_seed.add_subparsers(dest="seed_cmd", required=True)
+    p_seed_ws = seed_sub.add_parser("workspaces", help="seed workspace/project registry from TOML")
+    p_seed_ws.add_argument("--json", action="store_true")
+
+    p_projects = sub.add_parser("projects", help="manage projects")
+    projects_sub = p_projects.add_subparsers(dest="projects_cmd", required=True)
+    p_projects_list = projects_sub.add_parser("list")
+    p_projects_list.add_argument("--json", action="store_true")
+    p_projects_add = projects_sub.add_parser("add")
+    p_projects_add.add_argument("--id")
+    p_projects_add.add_argument("--name", required=True)
+    p_projects_add.add_argument("--repo-path")
+    p_projects_add.add_argument("--github")
+    p_projects_add.add_argument("--url")
+    p_projects_add.add_argument("--notes")
+
+    p_tasks = sub.add_parser("tasks", help="manage tasks")
+    tasks_sub = p_tasks.add_subparsers(dest="tasks_cmd", required=True)
+    p_tasks_create = tasks_sub.add_parser("create")
+    p_tasks_create.add_argument("--id")
+    p_tasks_create.add_argument("--title", required=True)
+    p_tasks_create.add_argument("--project")
+    p_tasks_create.add_argument("--state", dest="task_state", default="inbox")
+    p_tasks_create.add_argument("--priority", type=int, default=3)
+    p_tasks_create.add_argument("--branch")
+    p_tasks_create.add_argument("--worktree")
+    p_tasks_create.add_argument("--pr-url")
+    p_tasks_create.add_argument("--discussion-url")
+    p_tasks_create.add_argument("--notes")
+    p_tasks_create.add_argument("--json", action="store_true")
+    p_tasks_list = tasks_sub.add_parser("list")
+    p_tasks_list.add_argument("--state")
+    p_tasks_list.add_argument("--json", action="store_true")
+
+    p_agents = sub.add_parser("agents", help="manage agents")
+    agents_sub = p_agents.add_subparsers(dest="agents_cmd", required=True)
+    p_agents_register = agents_sub.add_parser("register")
+    p_agents_register.add_argument("--id")
+    p_agents_register.add_argument("--tool", required=True)
+    p_agents_register.add_argument("--status", default="idle")
+    p_agents_register.add_argument("--task")
+    p_agents_register.add_argument("--project")
+    p_agents_register.add_argument("--workspace")
+    p_agents_register.add_argument("--branch")
+    p_agents_register.add_argument("--worktree")
+    p_agents_register.add_argument("--surface-ref")
+    p_agents_register.add_argument("--notes")
+    p_agents_register.add_argument("--json", action="store_true")
+    p_agents_list = agents_sub.add_parser("list")
+    p_agents_list.add_argument("--json", action="store_true")
+
+    p_workspaces = sub.add_parser("workspaces", help="show seeded cmux/tmux cockpit workspaces")
+    workspaces_sub = p_workspaces.add_subparsers(dest="workspaces_cmd", required=True)
+    p_workspaces_list = workspaces_sub.add_parser("list")
+    p_workspaces_list.add_argument("--json", action="store_true")
+
+    p_cmux = sub.add_parser("cmux", help="native cmux adapter commands")
+    cmux_sub = p_cmux.add_subparsers(dest="cmux_cmd", required=True)
+    p_cmux_probe = cmux_sub.add_parser("probe", help="probe the official cmux binary")
+    p_cmux_probe.add_argument("--json", action="store_true")
+    p_cmux_workspaces = cmux_sub.add_parser("workspaces", help="show DanOS workspace to cmux action mapping")
+    p_cmux_workspaces.add_argument("--json", action="store_true")
+    p_cmux_open_home = cmux_sub.add_parser("open-home", help="open DanOS Home through native cmux")
+    p_cmux_open_home.add_argument("--dry-run", action="store_true")
+    p_cmux_notify = cmux_sub.add_parser("notify", help="send a native cmux notification")
+    p_cmux_notify.add_argument("--title", required=True)
+    p_cmux_notify.add_argument("--body", required=True)
+    p_cmux_notify.add_argument("--dry-run", action="store_true")
+    p_cmux_open_browser = cmux_sub.add_parser("open-browser", help="open a URL in a native cmux browser surface")
+    p_cmux_open_browser.add_argument("url")
+    p_cmux_open_browser.add_argument("--split", action="store_true", help="use browser open-split instead of browser open")
+    p_cmux_open_browser.add_argument("--dry-run", action="store_true")
+    p_cmux_send = cmux_sub.add_parser("send", help="send text to a cmux surface")
+    p_cmux_send.add_argument("surface")
+    p_cmux_send.add_argument("text")
+    p_cmux_send.add_argument("--dry-run", action="store_true")
+
+    p_pr = sub.add_parser("pr", help="GitHub PR cockpit workflows")
+    pr_sub = p_pr.add_subparsers(dest="pr_cmd", required=True)
+    p_pr_war_room = pr_sub.add_parser("war-room", help="open a read-only PR review war room")
+    p_pr_war_room.add_argument("pull_number")
+    p_pr_war_room.add_argument("--repo", help="GitHub owner/repo; defaults to DanOS project registry or git origin")
+    p_pr_war_room.add_argument("--dry-run", action="store_true")
+
+    p_tmux = sub.add_parser("tmux", help="read-only tmux probes")
+    tmux_sub = p_tmux.add_subparsers(dest="tmux_cmd", required=True)
+    p_tmux_list = tmux_sub.add_parser("list")
+    p_tmux_list.add_argument("--json", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    args.state_path = str(Path(args.state_path).expanduser())
+    conn = connect(Path(args.state_path))
+    ensure_schema(conn)
+
+    if args.cmd == "init":
+        return cmd_init(args, conn)
+    if args.cmd == "status":
+        return cmd_status(args, conn)
+    if args.cmd == "home":
+        return cmd_home(args, conn)
+    if args.cmd == "seed" and args.seed_cmd == "workspaces":
+        return cmd_seed(args, conn)
+    if args.cmd == "projects":
+        if args.projects_cmd == "list":
+            return cmd_projects_list(args, conn)
+        if args.projects_cmd == "add":
+            return cmd_projects_add(args, conn)
+    if args.cmd == "tasks":
+        if args.tasks_cmd == "create":
+            return cmd_tasks_create(args, conn)
+        if args.tasks_cmd == "list":
+            return cmd_tasks_list(args, conn)
+    if args.cmd == "agents":
+        if args.agents_cmd == "register":
+            return cmd_agents_register(args, conn)
+        if args.agents_cmd == "list":
+            return cmd_agents_list(args, conn)
+    if args.cmd == "workspaces" and args.workspaces_cmd == "list":
+        return cmd_workspaces_list(args, conn)
+    if args.cmd == "cmux":
+        if args.cmux_cmd == "probe":
+            return cmd_cmux_probe(args, conn)
+        if args.cmux_cmd == "workspaces":
+            return cmd_cmux_workspaces(args, conn)
+        if args.cmux_cmd == "open-home":
+            return cmd_cmux_open_home(args, conn)
+        if args.cmux_cmd == "notify":
+            return cmd_cmux_notify(args, conn)
+        if args.cmux_cmd == "open-browser":
+            return cmd_cmux_open_browser(args, conn)
+        if args.cmux_cmd == "send":
+            return cmd_cmux_send(args, conn)
+    if args.cmd == "pr" and args.pr_cmd == "war-room":
+        return cmd_pr_war_room(args, conn)
+    if args.cmd == "tmux" and args.tmux_cmd == "list":
+        return cmd_tmux_list(args, conn)
+    parser.error("unhandled command")
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except sqlite3.IntegrityError as exc:
+        print(f"danos: registry error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
