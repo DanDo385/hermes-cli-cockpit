@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/danos/schemas/danos-action.schema.json",
+  "title": "DanOS Action Envelope",
+  "description": "Local action request envelope for DanOS Core. Surfaces such as cmux, Obsidian plugins, dashboards, and CLI callers submit this shape for validation/routing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "ts",
+    "source",
+    "action",
+    "target",
+    "payload",
+    "dry_run",
+    "requires_confirmation"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Caller-provided unique action id. Prefer a timestamped id such as act_20260523_open_home."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp for action creation."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "cli",
+        "cmux",
+        "obsidian",
+        "obsidian-plugin",
+        "dashboard",
+        "hermes",
+        "openclaw",
+        "agent",
+        "test"
+      ],
+      "description": "Surface that requested the action."
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "open_cmux_workspace",
+        "open_obsidian_note",
+        "capture_obsidian_text",
+        "attach_tmux_session",
+        "send_context_to_hermes",
+        "close_day"
+      ],
+      "description": "Action name routed by DanOS Core."
+    },
+    "target": {
+      "type": "string",
+      "enum": [
+        "cmux",
+        "tmux",
+        "obsidian",
+        "hermes",
+        "openclaw",
+        "vault",
+        "danos"
+      ],
+      "description": "Primary adapter/target for the action."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Action-specific payload. DanOS Core validates deeper semantics per action.",
+      "additionalProperties": true,
+      "properties": {
+        "workspace": { "type": "string" },
+        "vault": { "type": "string" },
+        "file": { "type": "string" },
+        "text": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "session": { "type": "string" },
+        "project": { "type": "string" },
+        "note_path": { "type": "string" },
+        "heading": { "type": "string" },
+        "selection": { "type": "string" },
+        "summary": { "type": "string" }
+      }
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "When true, DanOS must report intended effects without mutation."
+    },
+    "requires_confirmation": {
+      "type": "boolean",
+      "description": "Whether live execution requires explicit user confirmation."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "action": { "const": "open_cmux_workspace" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": { "const": "cmux" },
+          "payload": { "required": ["workspace"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "action": { "const": "open_obsidian_note" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": { "const": "obsidian" },
+          "payload": { "required": ["vault", "file"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "action": { "const": "capture_obsidian_text" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": { "enum": ["obsidian", "vault"] },
+          "payload": { "required": ["text"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "action": { "const": "attach_tmux_session" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": { "const": "tmux" },
+          "payload": { "required": ["session"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "action": { "const": "send_context_to_hermes" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": { "const": "hermes" },
+          "payload": { "required": ["text"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "action": { "const": "close_day" } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": { "enum": ["obsidian", "vault", "danos"] },
+          "payload": { "required": ["summary"] }
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "id": "act_20260523_open_home",
+      "ts": "2026-05-23T15:00:00Z",
+      "source": "cmux",
+      "action": "open_cmux_workspace",
+      "target": "cmux",
+      "payload": { "workspace": "danos-home" },
+      "dry_run": true,
+      "requires_confirmation": false
+    },
+    {
+      "id": "act_20260523_open_dashboard",
+      "ts": "2026-05-23T15:01:00Z",
+      "source": "cmux",
+      "action": "open_obsidian_note",
+      "target": "obsidian",
+      "payload": {
+        "vault": "hermes",
+        "file": "agent-hermes/notes/danos-dashboard.md"
+      },
+      "dry_run": true,
+      "requires_confirmation": false
+    },
+    {
+      "id": "act_20260523_send_context",
+      "ts": "2026-05-23T15:02:00Z",
+      "source": "obsidian-plugin",
+      "action": "send_context_to_hermes",
+      "target": "hermes",
+      "payload": {
+        "note_path": "projects/hermes-cli-cockpit.md",
+        "text": "Selected context to send to Hermes"
+      },
+      "dry_run": true,
+      "requires_confirmation": true
+    }
+  ]
+}

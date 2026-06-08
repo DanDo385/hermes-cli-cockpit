@@ -26,6 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE_CONFIG = ROOT / "config" / "cockpit-workspaces.toml"
 DEFAULT_STATE = Path(os.environ.get("DANOS_STATE", Path.home() / ".local" / "state" / "hermes-cli-cockpit" / "danos.sqlite3"))
+DEFAULT_OBSIDIAN_VAULT = Path(os.environ.get("OBSIDIAN_VAULT_PATH", Path.home() / ".hermes" / "workspace"))
 TASK_STATES = {"inbox", "planned", "assigned", "running", "needs-human", "in-review", "merged", "archived", "blocked", "failed"}
 AGENT_STATES = {"idle", "spawning", "running", "waiting-for-input", "blocked", "tests-failed", "needs-review", "done", "failed", "abandoned"}
 CMUX_ACTION_IDS = {
@@ -143,6 +144,134 @@ def emit_json(data: object) -> None:
 def record_event(conn: sqlite3.Connection, kind: str, subject: str, message: str) -> None:
     conn.execute("INSERT INTO events(ts, kind, subject, message) VALUES (?, ?, ?, ?)", (now(), kind, subject, message))
     conn.commit()
+
+
+def local_day() -> str:
+    return datetime.now().date().isoformat()
+
+
+def obsidian_vault_path(args: argparse.Namespace | None = None) -> Path:
+    value = getattr(args, "vault", None) if args is not None else None
+    return Path(value).expanduser() if value else DEFAULT_OBSIDIAN_VAULT.expanduser()
+
+
+def obsidian_daily_path(vault: Path, day: str) -> Path:
+    return vault / "agent-hermes" / "daily" / f"{day}.md"
+
+
+def sanitize_note_line(value: str) -> str:
+    return " ".join(value.replace("\r", " ").replace("\n", " ").split())
+
+
+def parse_metric_values(values: list[str] | None) -> dict[str, str]:
+    metrics: dict[str, str] = {}
+    for raw in values or []:
+        if "=" not in raw:
+            raise SystemExit(f"invalid metric {raw!r}; expected key=value")
+        key, value = raw.split("=", 1)
+        key = slugify(key).replace("-", "_")
+        if not key:
+            raise SystemExit(f"invalid metric key in {raw!r}")
+        metrics[key] = sanitize_note_line(value)
+    return metrics
+
+
+def extract_carryovers(vault: Path, day: str) -> list[str]:
+    daily_dir = vault / "agent-hermes" / "daily"
+    if not daily_dir.exists():
+        return []
+    candidates = sorted(path for path in daily_dir.glob("*.md") if path.stem < day)
+    if not candidates:
+        return []
+    try:
+        text = candidates[-1].read_text(encoding="utf-8")
+    except OSError:
+        return []
+    carryovers: list[str] = []
+    in_focus = False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            in_focus = line.strip() == "## Current Focus"
+            continue
+        if in_focus and "[ ]" in line:
+            task = re.sub(r"^\s*(?:\d+\.|[-*])\s*\[ \]\s*", "", line).strip()
+            if task:
+                carryovers.append(task)
+        if len(carryovers) >= 3:
+            break
+    return carryovers
+
+
+def ensure_daily_note(vault: Path, day: str, priorities: list[str] | None = None, metrics: dict[str, str] | None = None) -> Path:
+    path = obsidian_daily_path(vault, day)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    priorities = [sanitize_note_line(item) for item in priorities or [] if sanitize_note_line(item)]
+    metrics = metrics or {}
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+        additions: list[str] = []
+        for priority in priorities:
+            numbered = f"1. [ ] {priority}"
+            bullet = f"- [ ] {priority}"
+            if numbered not in text and bullet not in text:
+                additions.append(f"- [ ] {priority}")
+        if additions:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("\n### Added Focus\n" + "\n".join(additions) + "\n")
+        return path
+
+    carryovers = extract_carryovers(vault, day)
+    lines = ["---", f"date: {day}", "type: danos-daily"]
+    for key, value in metrics.items():
+        lines.append(f"{key}: {value}")
+    lines.extend(
+        [
+            "---",
+            "",
+            f"# {day}",
+            "",
+            "## Current Focus",
+        ]
+    )
+    if priorities:
+        lines.extend(f"{idx}. [ ] {priority}" for idx, priority in enumerate(priorities, start=1))
+    else:
+        lines.append("- [ ] Choose today's first concrete outcome")
+    lines.extend(["", "## Carryovers"])
+    if carryovers:
+        lines.extend(f"- [ ] {item}" for item in carryovers)
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Quick Metrics"])
+    if metrics:
+        lines.extend(f"- {key}: {value}" for key, value in metrics.items())
+    else:
+        lines.append("- focus:")
+        lines.append("- energy:")
+    lines.extend(
+        [
+            "",
+            "## Activity Log",
+            f"- {now()} kind=today Created DanOS operating daily note.",
+            "",
+            "## Calendar / Schedule",
+            "- not imported yet",
+            "",
+            "## Notes",
+            "",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def append_to_daily_section(path: Path, heading: str, line: str) -> None:
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if f"## {heading}" not in text:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n## {heading}\n")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line.rstrip() + "\n")
 
 
 def simple_toml_value(raw: str) -> object:
@@ -412,10 +541,130 @@ def cmd_home(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
         print(f"  {agent['id']:<18} {agent['tool']:<12} {agent['status']:<18} task={agent.get('task_id') or '-'} workspace={agent.get('workspace_id') or '-'}")
     print()
     print("Next useful commands")
+    print("  bin/danos obsidian today --priority 'ship one outcome'")
+    print("  bin/danos obsidian capture 'idea or inbox item'")
+    print("  bin/danos obsidian log 'what changed' --kind build")
     print("  bin/danos tasks create --title 'short task' --project hermes")
     print("  bin/danos agents register --tool codex --task TASK-ID --workspace agent-deck")
     print("  bin/danos workspaces list")
     print("  bin/danos cmux probe")
+    return 0
+
+
+def cmd_obsidian_today(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    vault = obsidian_vault_path(args)
+    day = args.date or local_day()
+    metrics = parse_metric_values(args.metric)
+    path = ensure_daily_note(vault, day, args.priority, metrics)
+    record_event(conn, "obsidian.today", day, str(path))
+    print("DanOS Obsidian Today")
+    print("====================")
+    print(f"daily note: {path}")
+    print(f"vault:      {vault}")
+    print("next:       bin/danos obsidian log 'what happened' --kind work")
+    return 0
+
+
+def cmd_obsidian_capture(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    vault = obsidian_vault_path(args)
+    inbox = vault / "INBOX" / "danos-capture.md"
+    inbox.parent.mkdir(parents=True, exist_ok=True)
+    if not inbox.exists():
+        inbox.write_text("# DanOS Quick Capture Inbox\n\nRaw ideas and inputs captured from the DanOS cockpit. Triage into projects, admin, resources, or agent-hermes.\n\n", encoding="utf-8")
+    text = sanitize_note_line(args.text)
+    tags = [slugify(tag) for tag in args.tag or []]
+    tag_text = f" tags: {', '.join(tags)}" if tags else ""
+    with inbox.open("a", encoding="utf-8") as handle:
+        handle.write(f"- {now()} {text}{tag_text}\n")
+    record_event(conn, "obsidian.capture", "INBOX/danos-capture", text)
+    print(f"captured to {inbox}")
+    return 0
+
+
+def cmd_obsidian_log(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    vault = obsidian_vault_path(args)
+    day = args.date or local_day()
+    path = ensure_daily_note(vault, day)
+    kind = slugify(args.kind or "activity")
+    entry = sanitize_note_line(args.text)
+    append_to_daily_section(path, "Activity Log", f"- {now()} kind={kind} {entry}")
+    record_event(conn, "obsidian.log", day, entry)
+    print(f"logged activity to {path}")
+    return 0
+
+
+def cmd_obsidian_close_day(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    vault = obsidian_vault_path(args)
+    day = args.date or local_day()
+    path = ensure_daily_note(vault, day)
+    metrics = parse_metric_values(args.metric)
+    lines = [f"- {now()} {sanitize_note_line(args.summary)}"]
+    if metrics:
+        lines.append("  metrics:")
+        lines.extend(f"  - {key}: {value}" for key, value in metrics.items())
+    append_to_daily_section(path, "Close Day", "\n".join(lines))
+    record_event(conn, "obsidian.close_day", day, args.summary)
+    print(f"closed day in {path}")
+    return 0
+
+
+def cmd_obsidian_dashboard(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    vault = obsidian_vault_path(args)
+    day = args.date or local_day()
+    daily = ensure_daily_note(vault, day)
+    capture = vault / "INBOX" / "danos-capture.md"
+    dashboard = vault / "agent-hermes" / "notes" / "danos-dashboard.md"
+    dashboard.parent.mkdir(parents=True, exist_ok=True)
+    if not capture.exists():
+        capture.parent.mkdir(parents=True, exist_ok=True)
+        capture.write_text("# DanOS Quick Capture Inbox\n\n", encoding="utf-8")
+
+    focus_lines: list[str] = []
+    in_focus = False
+    for line in daily.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            in_focus = line.strip() == "## Current Focus"
+            continue
+        if in_focus and line.strip():
+            focus_lines.append(line)
+        if len(focus_lines) >= 5:
+            break
+    if not focus_lines:
+        focus_lines = ["- [ ] Choose today's first concrete outcome"]
+
+    text = "\n".join(
+        [
+            "# DanOS Obsidian Dashboard",
+            "",
+            "Obsidian is the DanOS execution surface: capture, focus, activity, metrics, and review live together.",
+            "",
+            "## Open Now",
+            f"- [[agent-hermes/daily/{day}|Today]]",
+            "- [[INBOX/danos-capture|Quick Capture Inbox]]",
+            "- [[agent-hermes/notes/next-steps|Hermes Next Steps]]",
+            "",
+            "## Current Focus",
+            *focus_lines,
+            "",
+            "## Command Loop",
+            "```bash",
+            "bin/danos obsidian today --priority 'first outcome' --metric focus=7",
+            "bin/danos obsidian capture 'idea or input' --tag inbox",
+            "bin/danos obsidian log 'meaningful action completed' --kind work",
+            "bin/danos obsidian close-day --summary 'what changed' --metric effort=8",
+            "```",
+            "",
+            "## Design Rule",
+            "Capture is cheap. Execution is the product. Keep the active work, notes, agent activity, and review loop in one place.",
+            "",
+        ]
+    )
+    dashboard.write_text(text, encoding="utf-8")
+    record_event(conn, "obsidian.dashboard", day, str(dashboard))
+    print("DanOS Obsidian Dashboard")
+    print("========================")
+    print(f"dashboard: {dashboard}")
+    print(f"today:     {daily}")
     return 0
 
 
@@ -793,6 +1042,31 @@ def build_parser() -> argparse.ArgumentParser:
     p_workspaces_list = workspaces_sub.add_parser("list")
     p_workspaces_list.add_argument("--json", action="store_true")
 
+    p_obsidian = sub.add_parser("obsidian", help="Obsidian execution-surface commands")
+    obsidian_sub = p_obsidian.add_subparsers(dest="obsidian_cmd", required=True)
+    p_obsidian_today = obsidian_sub.add_parser("today", help="create or update today's DanOS operating note")
+    p_obsidian_today.add_argument("--vault", help="Obsidian vault path; defaults to OBSIDIAN_VAULT_PATH or ~/.hermes/workspace")
+    p_obsidian_today.add_argument("--date", help="YYYY-MM-DD; defaults to local today")
+    p_obsidian_today.add_argument("--priority", action="append", default=[], help="current-focus priority; repeat up to three times")
+    p_obsidian_today.add_argument("--metric", action="append", default=[], help="frontmatter/quick metric as key=value; repeatable")
+    p_obsidian_capture = obsidian_sub.add_parser("capture", help="append a quick capture item to the DanOS inbox")
+    p_obsidian_capture.add_argument("text")
+    p_obsidian_capture.add_argument("--vault", help="Obsidian vault path")
+    p_obsidian_capture.add_argument("--tag", action="append", default=[], help="capture tag; repeatable")
+    p_obsidian_log = obsidian_sub.add_parser("log", help="append an activity-log entry to the daily note")
+    p_obsidian_log.add_argument("text")
+    p_obsidian_log.add_argument("--vault", help="Obsidian vault path")
+    p_obsidian_log.add_argument("--date", help="YYYY-MM-DD; defaults to local today")
+    p_obsidian_log.add_argument("--kind", default="activity", help="activity kind label")
+    p_obsidian_close = obsidian_sub.add_parser("close-day", help="append an end-of-day reflection and metrics")
+    p_obsidian_close.add_argument("--summary", required=True)
+    p_obsidian_close.add_argument("--vault", help="Obsidian vault path")
+    p_obsidian_close.add_argument("--date", help="YYYY-MM-DD; defaults to local today")
+    p_obsidian_close.add_argument("--metric", action="append", default=[], help="end metric as key=value; repeatable")
+    p_obsidian_dashboard = obsidian_sub.add_parser("dashboard", help="materialize the DanOS Obsidian dashboard note")
+    p_obsidian_dashboard.add_argument("--vault", help="Obsidian vault path")
+    p_obsidian_dashboard.add_argument("--date", help="YYYY-MM-DD; defaults to local today")
+
     p_cmux = sub.add_parser("cmux", help="native cmux adapter commands")
     cmux_sub = p_cmux.add_subparsers(dest="cmux_cmd", required=True)
     p_cmux_probe = cmux_sub.add_parser("probe", help="probe the official cmux binary")
@@ -860,6 +1134,17 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_agents_list(args, conn)
     if args.cmd == "workspaces" and args.workspaces_cmd == "list":
         return cmd_workspaces_list(args, conn)
+    if args.cmd == "obsidian":
+        if args.obsidian_cmd == "today":
+            return cmd_obsidian_today(args, conn)
+        if args.obsidian_cmd == "capture":
+            return cmd_obsidian_capture(args, conn)
+        if args.obsidian_cmd == "log":
+            return cmd_obsidian_log(args, conn)
+        if args.obsidian_cmd == "close-day":
+            return cmd_obsidian_close_day(args, conn)
+        if args.obsidian_cmd == "dashboard":
+            return cmd_obsidian_dashboard(args, conn)
     if args.cmd == "cmux":
         if args.cmux_cmd == "probe":
             return cmd_cmux_probe(args, conn)

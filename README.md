@@ -6,6 +6,21 @@ Hermes CLI Cockpit is a terminal-native operator cockpit for AI-assisted develop
 
 This repo is being extracted from Dan's private MBP/iMac Hermes workflow into a public-ready CLI project.
 
+## DanOS Cockpit direction
+
+This repo is the current DanOS Cockpit incubator. Do not rename or split it until the core CLI/API/schema boundaries are stable.
+
+Architecture and implementation references:
+
+```text
+docs/adr/0001-danos-cockpit-boundaries.md
+docs/adr/0002-danos-action-bus.md
+docs/adr/0003-danos-obsidian-plugin-boundary.md
+docs/danos-action-bus.md
+docs/plans/danos-cockpit-integration-plan.md
+schemas/danos-action.schema.json
+```
+
 ## Design source of truth
 
 Private Obsidian master page:
@@ -42,6 +57,11 @@ bin/cockpit-workspaces verify
 bin/cockpit-workspaces list
 bin/danos init --seed-workspaces
 bin/danos home
+bin/danos obsidian today --priority 'Ship one concrete outcome' --metric focus=7
+bin/danos obsidian capture 'Raw idea or input' --tag inbox
+bin/danos obsidian log 'Meaningful action completed' --kind work
+bin/danos obsidian close-day --summary 'What changed today' --metric effort=8
+bin/danos obsidian dashboard
 bin/danos cmux workspaces
 bin/danos cmux open-home --dry-run
 bin/danos cmux notify --title 'DanOS' --body 'Cockpit ready' --dry-run
@@ -135,6 +155,39 @@ OpenClaw static page:  4174
 OpenClaw lab gateway:  19001
 OpenClaw browser ctrl: 19003
 ```
+
+## DanOS Obsidian execution loop
+
+Inspired by the operating-system-not-graveyard pattern: Obsidian is not only memory storage. It is where DanOS starts the day, captures inputs, logs activity, closes the day, and materializes a dashboard note.
+
+```bash
+bin/danos obsidian today \
+  --priority 'Ship one concrete outcome' \
+  --priority 'Review carryovers' \
+  --metric focus=7 \
+  --metric energy=6
+
+bin/danos obsidian capture 'Turn this into a project note' --tag inbox --tag systems
+bin/danos obsidian log 'Implemented the vault work loop' --kind build
+bin/danos obsidian close-day --summary 'The work surface stayed in one place' --metric effort=8
+bin/danos obsidian dashboard
+```
+
+Default vault resolution:
+
+1. `--vault <path>` when provided.
+2. `$OBSIDIAN_VAULT_PATH` when set.
+3. `~/.hermes/workspace`.
+
+Generated active notes:
+
+```text
+agent-hermes/daily/YYYY-MM-DD.md       daily focus, carryovers, metrics, activity log, close-day reflection
+INBOX/danos-capture.md                 quick capture inbox
+agent-hermes/notes/danos-dashboard.md  local intelligence/dashboard surface
+```
+
+The design rule is simple: capture is cheap, execution is the product. DanOS should keep focus, notes, agent activity, and review in one inspectable vault loop instead of scattering the operator across five apps.
 
 ## Native cmux cockpit
 
