@@ -6,6 +6,38 @@ Hermes CLI Cockpit is a terminal-native operator cockpit for AI-assisted develop
 
 This repo is being extracted from Dan's private MBP/iMac Hermes workflow into a public-ready CLI project.
 
+## DanOS Cockpit direction
+
+This repository is being incubated into a broader **DanOS Cockpit** — the local
+operator/control layer connecting cmux, tmux, Obsidian, agents, tasks, project
+state, and local dashboards. Hermes CLI Cockpit is one surface inside DanOS,
+not its parent. The repo is **not** being renamed yet.
+
+Key documents:
+
+- `docs/adr/0003-danos-cockpit-boundaries.md` — ownership boundaries between
+  cmux / tmux / launchd / Obsidian / DanOS Core, why the repo is not renamed
+  yet, and the future repo-split criteria.
+- `docs/plans/danos-cockpit-integration-plan.md` — phased implementation
+  plan (Phase 0 repo safety through Phase 6 packaging/split decision) with
+  files, tests, validation commands, and rollback notes per phase.
+- `docs/danos-action-bus.md` — why DanOS needs an action bus, the
+  CLI-first → HTTP → Obsidian-plugin order, security model, and dry-run
+  behavior.
+- `schemas/danos-action.schema.json` — machine-readable local action
+  envelope (id / ts / source / action / target / payload / dry_run /
+  requires_confirmation) with canonical examples for `open_cmux_workspace`,
+  `open_obsidian_note`, `capture_obsidian_text`, `attach_tmux_session`,
+  `send_context_to_hermes`, and `close_day`.
+
+Action envelope helpers (Phase 1 vertical slice):
+
+```bash
+bin/danos actions schema --path
+bin/danos actions print-examples
+bin/danos actions print-examples | bin/danos actions validate -
+```
+
 ## Design source of truth
 
 Private Obsidian master page:

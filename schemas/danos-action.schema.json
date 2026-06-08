@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://danos.local/schemas/danos-action.schema.json",
+  "title": "DanOS Action Envelope",
+  "description": "Local action envelope used by DanOS Core to route requests from cmux, Obsidian plugin, CLI, file queue, or HTTP bus into safe local effects. Sanitized: no raw secrets, hostnames, account names, or logs in this schema or its examples.",
+  "type": "object",
+  "required": ["id", "ts", "source", "action", "target"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Stable local identifier for this action envelope. Used for dedup, audit, and reply correlation. Recommended shape: 'act-YYYYMMDDHHMMSS-<short-slug>' or a ULID."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 / ISO 8601 timestamp (UTC, second precision is fine)."
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "enum": [
+        "danos-cli",
+        "cmux",
+        "obsidian-plugin",
+        "tmux",
+        "agent",
+        "web-dashboard",
+        "file-queue",
+        "test"
+      ],
+      "description": "Originator of the action. Identifies which surface created the envelope so DanOS Core can apply correct trust/authz."
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Snake-case verb from the DanOS controlled vocabulary. Unknown verbs MUST be rejected by Core."
+    },
+    "target": {
+      "type": "object",
+      "description": "What the action operates on. Shape varies by 'action'.",
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Target kind, e.g. 'cmux_workspace', 'obsidian_note', 'tmux_session', 'agent_surface', 'task'."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Target identifier (workspace id, vault-relative note path, tmux session name, etc.). Use logical ids — not hostnames or absolute filesystem paths in shared docs."
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "description": "Action-specific data. SHOULD NOT carry raw secrets; carry references (e.g. 1Password item ids) instead.",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "If true, Core MUST NOT cause a side effect; it MUST return the resolved plan only.",
+      "default": false
+    },
+    "requires_confirmation": {
+      "type": "boolean",
+      "description": "If true, Core MUST prompt the human operator (CLI confirm, cmux confirm overlay, or Obsidian modal) before executing.",
+      "default": false
+    },
+    "reply_to": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Optional local-only callback hint. Examples: 'file://<queue-path>', 'cli-stdout', 'cmux-surface:<id>'. Networked URIs are not accepted."
+    }
+  },
+  "examples": [
+    {
+      "id": "act-20260523T230000-open-home",
+      "ts": "2026-05-23T23:00:00Z",
+      "source": "cmux",
+      "action": "open_cmux_workspace",
+      "target": {
+        "kind": "cmux_workspace",
+        "id": "home"
+      },
+      "payload": {
+        "action_id": "danos.home",
+        "focus": true
+      },
+      "dry_run": false,
+      "requires_confirmation": false
+    },
+    {
+      "id": "act-20260523T230030-open-note",
+      "ts": "2026-05-23T23:00:30Z",
+      "source": "danos-cli",
+      "action": "open_obsidian_note",
+      "target": {
+        "kind": "obsidian_note",
+        "id": "projects/danos-cockpit/cli-mission-control-master-page.md"
+      },
+      "payload": {
+        "vault_alias": "hermes",
+        "uri_scheme": "obsidian"
+      },
+      "dry_run": false,
+      "requires_confirmation": false
+    },
+    {
+      "id": "act-20260523T230100-capture",
+      "ts": "2026-05-23T23:01:00Z",
+      "source": "obsidian-plugin",
+      "action": "capture_obsidian_text",
+      "target": {
+        "kind": "obsidian_note",
+        "id": "inbox/captures.md"
+      },
+      "payload": {
+        "vault_alias": "hermes",
+        "heading": "Captures",
+        "text": "Plan DanOS action bus rollout."
+      },
+      "dry_run": false,
+      "requires_confirmation": false
+    },
+    {
+      "id": "act-20260523T230200-attach-tmux",
+      "ts": "2026-05-23T23:02:00Z",
+      "source": "cmux",
+      "action": "attach_tmux_session",
+      "target": {
+        "kind": "tmux_session",
+        "id": "cockpit-workbench"
+      },
+      "payload": {
+        "window": "agents",
+        "select_only": false
+      },
+      "dry_run": true,
+      "requires_confirmation": false
+    },
+    {
+      "id": "act-20260523T230300-context-hermes",
+      "ts": "2026-05-23T23:03:00Z",
+      "source": "danos-cli",
+      "action": "send_context_to_hermes",
+      "target": {
+        "kind": "agent_surface",
+        "id": "mission-hermes"
+      },
+      "payload": {
+        "context_kind": "task",
+        "task_id": "TASK-20260523-review-pr-war-room",
+        "summary": "Review PR war room MVP scope and acceptance criteria."
+      },
+      "dry_run": false,
+      "requires_confirmation": true
+    },
+    {
+      "id": "act-20260523T235959-close-day",
+      "ts": "2026-05-23T23:59:59Z",
+      "source": "danos-cli",
+      "action": "close_day",
+      "target": {
+        "kind": "session",
+        "id": "today"
+      },
+      "payload": {
+        "snapshot_workspaces": true,
+        "archive_completed_tasks": true,
+        "write_daily_note": true,
+        "daily_note_path": "journal/2026-05-23.md"
+      },
+      "dry_run": true,
+      "requires_confirmation": true
+    }
+  ],
+  "x-danos-action-vocabulary": [
+    "open_cmux_workspace",
+    "open_obsidian_note",
+    "capture_obsidian_text",
+    "attach_tmux_session",
+    "send_context_to_hermes",
+    "close_day"
+  ]
+}

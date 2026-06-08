@@ -25,6 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE_CONFIG = ROOT / "config" / "cockpit-workspaces.toml"
+DEFAULT_ACTION_SCHEMA = ROOT / "schemas" / "danos-action.schema.json"
 DEFAULT_STATE = Path(os.environ.get("DANOS_STATE", Path.home() / ".local" / "state" / "hermes-cli-cockpit" / "danos.sqlite3"))
 TASK_STATES = {"inbox", "planned", "assigned", "running", "needs-human", "in-review", "merged", "archived", "blocked", "failed"}
 AGENT_STATES = {"idle", "spawning", "running", "waiting-for-input", "blocked", "tests-failed", "needs-review", "done", "failed", "abandoned"}
@@ -706,6 +707,154 @@ def cmd_pr_war_room(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
     return 0
 
 
+def load_action_schema(path: Path) -> dict:
+    return json.loads(path.expanduser().read_text(encoding="utf-8"))
+
+
+def _schema_type_check(value: object, expected: str) -> bool:
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    return True
+
+
+_DATE_TIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$"
+)
+
+
+def _validate_property(name: str, value: object, prop_schema: dict, errors: list[str]) -> None:
+    expected_type = prop_schema.get("type")
+    if expected_type and not _schema_type_check(value, expected_type):
+        errors.append(f"{name}: expected type {expected_type}, got {type(value).__name__}")
+        return
+    if "enum" in prop_schema and value not in prop_schema["enum"]:
+        allowed = ", ".join(map(repr, prop_schema["enum"]))
+        errors.append(f"{name}: value {value!r} not in allowed enum [{allowed}]")
+    if isinstance(value, str):
+        if "minLength" in prop_schema and len(value) < int(prop_schema["minLength"]):
+            errors.append(f"{name}: shorter than minLength {prop_schema['minLength']}")
+        if "maxLength" in prop_schema and len(value) > int(prop_schema["maxLength"]):
+            errors.append(f"{name}: longer than maxLength {prop_schema['maxLength']}")
+        if "pattern" in prop_schema and not re.search(prop_schema["pattern"], value):
+            errors.append(f"{name}: does not match pattern {prop_schema['pattern']}")
+        if prop_schema.get("format") == "date-time" and not _DATE_TIME_RE.match(value):
+            errors.append(f"{name}: not a valid RFC 3339 date-time")
+    if isinstance(value, dict) and "properties" in prop_schema:
+        for sub_name, sub_schema in prop_schema["properties"].items():
+            if sub_name in value:
+                _validate_property(f"{name}.{sub_name}", value[sub_name], sub_schema, errors)
+
+
+def validate_action_envelope(envelope: object, schema: dict) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(envelope, dict):
+        return [f"envelope must be a JSON object, got {type(envelope).__name__}"]
+    required = schema.get("required", [])
+    for key in required:
+        if key not in envelope:
+            errors.append(f"missing required field: {key}")
+    if schema.get("additionalProperties") is False:
+        allowed = set(schema.get("properties", {}).keys())
+        for key in envelope.keys():
+            if key not in allowed:
+                errors.append(f"unknown top-level field: {key}")
+    properties = schema.get("properties", {})
+    for key, value in envelope.items():
+        if key in properties:
+            _validate_property(key, value, properties[key], errors)
+    return errors
+
+
+def cmd_actions_validate(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    schema_path = Path(args.schema_path)
+    if not schema_path.exists():
+        print(f"danos: action schema not found: {schema_path}", file=sys.stderr)
+        return 2
+    schema = load_action_schema(schema_path)
+    raw = sys.stdin.read() if args.path == "-" else Path(args.path).expanduser().read_text(encoding="utf-8")
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"danos: invalid JSON: {exc}", file=sys.stderr)
+        return 1
+    if isinstance(envelope, list):
+        all_errors: list[tuple[int, list[str]]] = []
+        for index, item in enumerate(envelope):
+            errors = validate_action_envelope(item, schema)
+            if errors:
+                all_errors.append((index, errors))
+        if all_errors:
+            if args.json:
+                emit_json(
+                    {
+                        "ok": False,
+                        "count": len(envelope),
+                        "errors": [{"index": idx, "errors": errs} for idx, errs in all_errors],
+                    }
+                )
+            else:
+                for idx, errors in all_errors:
+                    print(f"envelope[{idx}]: invalid", file=sys.stderr)
+                    for err in errors:
+                        print(f"  - {err}", file=sys.stderr)
+            return 1
+        if args.json:
+            emit_json({"ok": True, "count": len(envelope)})
+        else:
+            print(f"actions: ok ({len(envelope)} envelopes)")
+        return 0
+    errors = validate_action_envelope(envelope, schema)
+    if errors:
+        if args.json:
+            emit_json({"ok": False, "errors": errors})
+        else:
+            print("envelope: invalid", file=sys.stderr)
+            for err in errors:
+                print(f"  - {err}", file=sys.stderr)
+        return 1
+    if args.json:
+        emit_json({"ok": True})
+    else:
+        action_name = envelope.get("action", "?")
+        print(f"actions: ok ({action_name})")
+    return 0
+
+
+def cmd_actions_print_examples(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    schema_path = Path(args.schema_path)
+    if not schema_path.exists():
+        print(f"danos: action schema not found: {schema_path}", file=sys.stderr)
+        return 2
+    schema = load_action_schema(schema_path)
+    examples = schema.get("examples", [])
+    emit_json(examples)
+    return 0
+
+
+def cmd_actions_schema(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    schema_path = Path(args.schema_path)
+    if not schema_path.exists():
+        print(f"danos: action schema not found: {schema_path}", file=sys.stderr)
+        return 2
+    if args.path_only:
+        print(str(schema_path))
+        return 0
+    sys.stdout.write(schema_path.read_text(encoding="utf-8"))
+    return 0
+
+
 def cmd_tmux_list(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
     data = tmux_probe()
     if args.json:
@@ -821,6 +970,42 @@ def build_parser() -> argparse.ArgumentParser:
     p_pr_war_room.add_argument("--repo", help="GitHub owner/repo; defaults to DanOS project registry or git origin")
     p_pr_war_room.add_argument("--dry-run", action="store_true")
 
+    p_actions = sub.add_parser("actions", help="DanOS action envelope helpers")
+    actions_sub = p_actions.add_subparsers(dest="actions_cmd", required=True)
+    p_actions_validate = actions_sub.add_parser(
+        "validate", help="validate a JSON action envelope (or array) against the schema"
+    )
+    p_actions_validate.add_argument(
+        "path",
+        nargs="?",
+        default="-",
+        help="path to a JSON file with one envelope or an array; use - for stdin (default)",
+    )
+    p_actions_validate.add_argument(
+        "--schema",
+        dest="schema_path",
+        default=str(DEFAULT_ACTION_SCHEMA),
+        help="path to danos-action.schema.json",
+    )
+    p_actions_validate.add_argument("--json", action="store_true", help="emit machine-readable result")
+    p_actions_examples = actions_sub.add_parser(
+        "print-examples", help="print canonical action envelope examples from the schema"
+    )
+    p_actions_examples.add_argument(
+        "--schema",
+        dest="schema_path",
+        default=str(DEFAULT_ACTION_SCHEMA),
+    )
+    p_actions_schema = actions_sub.add_parser(
+        "schema", help="print the action schema (or its filesystem path with --path)"
+    )
+    p_actions_schema.add_argument(
+        "--schema",
+        dest="schema_path",
+        default=str(DEFAULT_ACTION_SCHEMA),
+    )
+    p_actions_schema.add_argument("--path", dest="path_only", action="store_true")
+
     p_tmux = sub.add_parser("tmux", help="read-only tmux probes")
     tmux_sub = p_tmux.add_subparsers(dest="tmux_cmd", required=True)
     p_tmux_list = tmux_sub.add_parser("list")
@@ -875,6 +1060,13 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_cmux_send(args, conn)
     if args.cmd == "pr" and args.pr_cmd == "war-room":
         return cmd_pr_war_room(args, conn)
+    if args.cmd == "actions":
+        if args.actions_cmd == "validate":
+            return cmd_actions_validate(args, conn)
+        if args.actions_cmd == "print-examples":
+            return cmd_actions_print_examples(args, conn)
+        if args.actions_cmd == "schema":
+            return cmd_actions_schema(args, conn)
     if args.cmd == "tmux" and args.tmux_cmd == "list":
         return cmd_tmux_list(args, conn)
     parser.error("unhandled command")
