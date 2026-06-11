@@ -38,6 +38,7 @@ CMUX_ACTION_IDS = {
     "open-source-radar": "oss.radar",
 }
 CMUX_WORKSPACE_ORDER = {workspace_id: index for index, workspace_id in enumerate(CMUX_ACTION_IDS, start=1)}
+RESEARCH_MODES = {"learn", "problem", "world", "job", "portfolio"}
 
 
 def now() -> str:
@@ -707,6 +708,134 @@ def cmd_pr_war_room(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
     return 0
 
 
+def research_preview(text: str) -> str:
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        for index, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                lines = lines[index + 1 :]
+                break
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("|"):
+            continue
+        if stripped.lower().startswith(("retrieval date:", "created:", "status:", "source:")):
+            continue
+        cleaned.append(re.sub(r"^[-*]\s+", "", stripped))
+    return "\n".join(cleaned)[:500]
+
+
+def read_research_source(source: str) -> dict:
+    path = Path(source).expanduser()
+    if path.exists() and path.is_file():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return {"source": source, "kind": "file", "preview": research_preview(text)}
+    return {"source": source, "kind": "reference", "preview": "Source queued for manual or future provider-backed retrieval."}
+
+
+def make_research_packet(args: argparse.Namespace) -> dict:
+    sources = [read_research_source(source) for source in args.source]
+    if sources:
+        claims = [
+            {
+                "claim": (item["preview"].splitlines()[0] if item["preview"] else "Source queued for review."),
+                "evidence": item["source"],
+                "confidence": "medium" if item["kind"] == "file" else "low",
+                "implication": "Use this as input for a bounded DanOS research brief, not as a final verified conclusion.",
+            }
+            for item in sources
+        ]
+    else:
+        claims = [
+            {
+                "claim": "No sources were provided; this packet is an intake scaffold only.",
+                "evidence": "none",
+                "confidence": "low",
+                "implication": "Add source paths or URLs before treating the answer as grounded.",
+            }
+        ]
+
+    mode_actions = {
+        "learn": "Turn the brief into a timeboxed learning sprint with quiz checks.",
+        "problem": "Define the evaluator/rubric before changing the solution artifact.",
+        "world": "Add primary sources, explicit uncertainty, and a dated forecast if useful.",
+        "job": "Map the finding to one proof asset, role target, outreach angle, or OSS contribution slice.",
+        "portfolio": "Convert the finding into a sanitized proof packet or demo narrative.",
+    }
+    return {
+        "title": f"Research Brief: {args.topic}",
+        "mode": args.mode,
+        "topic": args.topic,
+        "question": args.question,
+        "dry_run": bool(args.dry_run),
+        "one_sentence_answer": "This is a preview research packet; verify sources before acting.",
+        "source_queue": sources,
+        "claims": claims,
+        "contradictions_or_uncertainties": [
+            "Sources may be incomplete or unverified.",
+            "No external action should occur without Dan's explicit approval.",
+        ],
+        "next_actions": [mode_actions[args.mode], "Decide whether to save this packet into the appropriate vault/project lane."],
+        "artifact_ideas": [
+            "Obsidian research brief",
+            "job-target memo" if args.mode == "job" else "learning/problem/world-model packet",
+            "portfolio-safe summary after human review",
+        ],
+        "follow_up_prompts": [
+            "What evaluator should judge whether this research was useful?",
+            "What single next action would make this non-theoretical?",
+        ],
+    }
+
+
+def render_research_markdown(packet: dict) -> str:
+    lines = [
+        f"# {packet['title']}",
+        "",
+        f"Mode: {packet['mode']}",
+        f"Topic: {packet['topic']}",
+        f"Question: {packet['question']}",
+        f"Dry run: {str(packet['dry_run']).lower()}",
+        "",
+        "## Executive Answer",
+        packet["one_sentence_answer"],
+        "",
+        "## Source Queue",
+    ]
+    for item in packet["source_queue"]:
+        lines.append(f"- {item['source']} ({item['kind']})")
+    if not packet["source_queue"]:
+        lines.append("- none")
+    lines.extend(["", "## Claims / Evidence"])
+    for claim in packet["claims"]:
+        lines.append(f"- Claim: {claim['claim']}")
+        lines.append(f"  Evidence: {claim['evidence']}")
+        lines.append(f"  Confidence: {claim['confidence']}")
+        lines.append(f"  Implication: {claim['implication']}")
+    lines.extend(["", "## Contradictions / Uncertainties"])
+    lines.extend(f"- {item}" for item in packet["contradictions_or_uncertainties"])
+    lines.extend(["", "## Next Actions"])
+    lines.extend(f"- {item}" for item in packet["next_actions"])
+    lines.extend(["", "## Artifact Ideas"])
+    lines.extend(f"- {item}" for item in packet["artifact_ideas"])
+    lines.extend(["", "## Follow-up Prompts"])
+    lines.extend(f"- {item}" for item in packet["follow_up_prompts"])
+    lines.extend(["", "Safety: No external side effects were performed."])
+    return "\n".join(lines) + "\n"
+
+
+def cmd_research_brief(args: argparse.Namespace, conn: sqlite3.Connection) -> int:
+    packet = make_research_packet(args)
+    if args.json:
+        emit_json(packet)
+    else:
+        sys.stdout.write(render_research_markdown(packet))
+    if not args.dry_run:
+        record_event(conn, "research.brief", args.topic, json.dumps({"mode": args.mode, "question": args.question}))
+    return 0
+
+
 def load_action_schema(path: Path) -> dict:
     return json.loads(path.expanduser().read_text(encoding="utf-8"))
 
@@ -970,6 +1099,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_pr_war_room.add_argument("--repo", help="GitHub owner/repo; defaults to DanOS project registry or git origin")
     p_pr_war_room.add_argument("--dry-run", action="store_true")
 
+    p_research = sub.add_parser("research", help="bounded research packet helpers")
+    research_sub = p_research.add_subparsers(dest="research_cmd", required=True)
+    p_research_brief = research_sub.add_parser("brief", help="emit a dry-run source-backed research packet")
+    p_research_brief.add_argument("--mode", required=True, choices=sorted(RESEARCH_MODES))
+    p_research_brief.add_argument("--topic", required=True)
+    p_research_brief.add_argument("--question", required=True)
+    p_research_brief.add_argument("--source", action="append", default=[], help="source path or URL/reference; repeatable")
+    p_research_brief.add_argument("--dry-run", action="store_true", help="preview only; perform no external side effects")
+    p_research_brief.add_argument("--json", action="store_true", help="emit machine-readable packet")
+
     p_actions = sub.add_parser("actions", help="DanOS action envelope helpers")
     actions_sub = p_actions.add_subparsers(dest="actions_cmd", required=True)
     p_actions_validate = actions_sub.add_parser(
@@ -1017,6 +1156,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.state_path = str(Path(args.state_path).expanduser())
+    if args.cmd == "research" and args.research_cmd == "brief" and args.dry_run:
+        return cmd_research_brief(args, None)
     conn = connect(Path(args.state_path))
     ensure_schema(conn)
 
@@ -1060,6 +1201,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_cmux_send(args, conn)
     if args.cmd == "pr" and args.pr_cmd == "war-room":
         return cmd_pr_war_room(args, conn)
+    if args.cmd == "research" and args.research_cmd == "brief":
+        return cmd_research_brief(args, conn)
     if args.cmd == "actions":
         if args.actions_cmd == "validate":
             return cmd_actions_validate(args, conn)
