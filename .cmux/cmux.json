@@ -4,37 +4,42 @@
     {
       "name": "DanOS Home / Cockpit Overview",
       "description": "Calm local cockpit overview: registry, tasks, agents, cmux/tmux readiness, and next actions.",
-      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/danos init --seed-workspaces >/dev/null && bin/danos home"
+      "command": "bin/cmux-cockpit-page home -- cd \"$HOME/Code/hermes-cli-cockpit\" && bin/danos init --seed-workspaces >/dev/null && bin/danos home"
     },
     {
       "name": "Hermes Tool / Hermes CLI Mission Control",
-      "description": "Peer AI assistant surface: conversation, sessions, models, tools, auth, notes, ops — not merged with OpenClaw.",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'"
+      "description": "Peer AI assistant surface: conversation, sessions, models, tools, auth, notes, ops \u2014 not merged with OpenClaw.",
+      "command": "bin/cmux-cockpit-page hermes -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'"
     },
     {
       "name": "OpenClaw Tool / OpenClaw CLI Mission Control",
-      "description": "Peer AI runtime surface alongside Hermes. Missing features show unsupported/not configured — pane stays visible.",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'"
+      "description": "Peer AI runtime surface alongside Hermes. Missing features show unsupported/not configured \u2014 pane stays visible.",
+      "command": "bin/cmux-cockpit-page openclaw -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'"
+    },
+    {
+      "name": "Herdr Ops / Agent Session Pilot",
+      "description": "Separate Herdr-owned agent PTY pilot on the MBP. Does not touch mission tmux or the gateway.",
+      "command": "bin/cmux-cockpit-page agents -- ssh -tt mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; if command -v herdr >/dev/null 2>&1; then exec herdr --session danos-herdr; else printf \"Herdr is not installed on the MBP pilot path yet.\\n\"; exec zsh -l; fi'"
     },
     {
       "name": "Coding Workbench",
-      "description": "Neovim, runway, review, browser testing, project docs. Hermes/OpenClaw chat lives in mission controls — not here.",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null && tmux attach -d -t cockpit-workbench'"
+      "description": "Neovim, runway, review, browser testing, project docs. Hermes/OpenClaw chat lives in mission controls \u2014 not here.",
+      "command": "bin/cmux-cockpit-page code -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null && tmux attach -d -t cockpit-workbench'"
     },
     {
       "name": "Agent Deck",
       "description": "Worktrees, agent slots, diff review gates. One agent, one branch, one worktree.",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:agents; tmux attach -d -t cockpit-workbench'"
+      "command": "bin/cmux-cockpit-page agents -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:agents; tmux attach -d -t cockpit-workbench'"
     },
     {
       "name": "Open Source Radar / Community",
-      "description": "Project registry, GitHub PRs/issues, Dan's PRs, discussions, Discord drafts — no surprise posting.",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach && tmux attach -t cockpit-community'"
+      "description": "Project registry, GitHub PRs/issues, Dan's PRs, discussions, Discord drafts \u2014 no surprise posting.",
+      "command": "bin/cmux-cockpit-page community -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach && tmux attach -t cockpit-community'"
     },
     {
       "name": "Obsidian Vault",
       "description": "Open canonical Hermes Obsidian vault (terminal cwd + Obsidian or Finder).",
-      "command": "\"$HOME/Code/hermes-cli-cockpit/bin/open-hermes-vault\""
+      "command": "bin/cmux-cockpit-page notes -- \"$HOME/Code/hermes-cli-cockpit/bin/open-hermes-vault\""
     }
   ],
   "actions": {
@@ -42,28 +47,64 @@
       "type": "command",
       "title": "DanOS Home",
       "subtitle": "Cockpit overview: agents, tasks, workspaces, cmux/tmux readiness",
-      "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/danos init --seed-workspaces >/dev/null && bin/danos home",
+      "command": "bin/cmux-cockpit-page home -- cd \"$HOME/Code/hermes-cli-cockpit\" && bin/danos init --seed-workspaces >/dev/null && bin/danos home",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["danos", "home", "cockpit", "overview", "agents", "tasks"]
+      "keywords": [
+        "danos",
+        "home",
+        "cockpit",
+        "overview",
+        "agents",
+        "tasks"
+      ]
     },
     "hermes.ops": {
       "type": "command",
       "title": "Hermes Mission Control",
       "subtitle": "Hermes conversation, sessions, models, tools, ops",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'",
+      "command": "bin/cmux-cockpit-page hermes -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-hermes || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-hermes --no-attach && tmux attach -t mission-hermes'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["hermes", "mbp", "gateway", "runtime", "tmux", "mission"]
+      "keywords": [
+        "hermes",
+        "mbp",
+        "gateway",
+        "runtime",
+        "tmux",
+        "mission"
+      ]
     },
     "openclaw.ops": {
       "type": "command",
       "title": "OpenClaw Mission Control",
-      "subtitle": "Peer runtime — separate from Hermes",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'",
+      "subtitle": "Peer runtime \u2014 separate from Hermes",
+      "command": "bin/cmux-cockpit-page openclaw -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t mission-openclaw || /Users/openclaw/Code/hermes-tmux-workspaces/bin/mission-openclaw --no-attach && tmux attach -t mission-openclaw'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["openclaw", "mbp", "gateway", "runtime", "tmux", "mission"]
+      "keywords": [
+        "openclaw",
+        "mbp",
+        "gateway",
+        "runtime",
+        "tmux",
+        "mission"
+      ]
+    },
+    "herdr.ops": {
+      "type": "command",
+      "title": "Herdr Ops Pilot",
+      "subtitle": "Separate MBP agent PTY session. Never nested inside mission tmux.",
+      "command": "bin/cmux-cockpit-page agents -- ssh -tt mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; if command -v herdr >/dev/null 2>&1; then exec herdr --session danos-herdr; else printf \"Herdr is not installed on the MBP pilot path yet.\\n\"; exec zsh -l; fi'",
+      "target": "newTabInCurrentPane",
+      "confirm": false,
+      "keywords": [
+        "herdr",
+        "agent",
+        "pty",
+        "mbp",
+        "pilot"
+      ]
     },
     "cockpit.workspaceCards": {
       "type": "command",
@@ -72,79 +113,124 @@
       "command": "cd \"$HOME/Code/hermes-cli-cockpit\" && bin/cockpit-workspaces list",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["cards", "workspace", "cockpit"]
+      "keywords": [
+        "cards",
+        "workspace",
+        "cockpit"
+      ]
     },
     "vault.root": {
       "type": "command",
       "title": "Vault Root",
       "subtitle": "Open Hermes vault in Obsidian or Finder",
-      "command": "\"$HOME/Code/hermes-cli-cockpit/bin/open-hermes-vault\"",
+      "command": "bin/cmux-cockpit-page notes -- \"$HOME/Code/hermes-cli-cockpit/bin/open-hermes-vault\"",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["obsidian", "vault", "notes"]
+      "keywords": [
+        "obsidian",
+        "vault",
+        "notes"
+      ]
     },
     "code.workbench": {
       "type": "command",
       "title": "Coding Workbench",
-      "subtitle": "Neovim, runway, review, browser — no merged agent chat",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null && tmux attach -d -t cockpit-workbench'",
+      "subtitle": "Neovim, runway, review, browser \u2014 no merged agent chat",
+      "command": "bin/cmux-cockpit-page code -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null && tmux attach -d -t cockpit-workbench'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["code", "workbench", "tmux", "neovim", "browser", "runway"]
+      "keywords": [
+        "code",
+        "workbench",
+        "tmux",
+        "neovim",
+        "browser",
+        "runway"
+      ]
     },
     "code.browser": {
       "type": "command",
       "title": "Browser Surface",
       "subtitle": "Jump to cockpit-workbench browser testing window",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:browser; tmux attach -d -t cockpit-workbench'",
+      "command": "bin/cmux-cockpit-page browser -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:browser; tmux attach -d -t cockpit-workbench'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["browser", "preview", "smoke", "frontend"]
+      "keywords": [
+        "browser",
+        "preview",
+        "smoke",
+        "frontend"
+      ]
     },
     "agent.deck": {
       "type": "command",
       "title": "Agent Deck",
       "subtitle": "Worktree slots and orchestration",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:agents; tmux attach -d -t cockpit-workbench'",
+      "command": "bin/cmux-cockpit-page agents -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:agents; tmux attach -d -t cockpit-workbench'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["agents", "deck", "worktrees", "multi-agent"]
+      "keywords": [
+        "agents",
+        "deck",
+        "worktrees",
+        "multi-agent"
+      ]
     },
     "oss.radar": {
       "type": "command",
       "title": "OSS Radar / Community",
       "subtitle": "GitHub, PRs, discussions, Discord drafts",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach && tmux attach -t cockpit-community'",
+      "command": "bin/cmux-cockpit-page community -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach && tmux attach -t cockpit-community'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["oss", "community", "github", "discord", "radar"]
+      "keywords": [
+        "oss",
+        "community",
+        "github",
+        "discord",
+        "radar"
+      ]
     },
     "github.review": {
       "type": "command",
       "title": "GitHub Review",
       "subtitle": "OSS Radar: Hermes GitHub PRs and my PRs",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community 2>/dev/null || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach; tmux select-window -t cockpit-community:github; tmux attach -d -t cockpit-community'",
+      "command": "bin/cmux-cockpit-page review -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community 2>/dev/null || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach; tmux select-window -t cockpit-community:github; tmux attach -d -t cockpit-community'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["github", "pr", "review", "diff"]
+      "keywords": [
+        "github",
+        "pr",
+        "review",
+        "diff"
+      ]
     },
     "obsidian.notes": {
       "type": "command",
       "title": "Obsidian Notes",
       "subtitle": "Workbench project docs or vault root",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:obsidian; tmux attach -d -t cockpit-workbench'",
+      "command": "bin/cmux-cockpit-page notes -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux has-session -t cockpit-workbench 2>/dev/null || CMUX_SESSION=cockpit-workbench CMUX_TITLE=\"Coding Workbench\" /Users/openclaw/Code/hermes-tmux-workspaces/bin/tmux-workbench --no-attach --project=/Users/openclaw/Code/hermes-tmux-workspaces >/dev/null; tmux select-window -t cockpit-workbench:obsidian; tmux attach -d -t cockpit-workbench'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["obsidian", "vault", "notes"]
+      "keywords": [
+        "obsidian",
+        "vault",
+        "notes"
+      ]
     },
     "discord.workflow": {
       "type": "command",
       "title": "Discord Workflow",
-      "subtitle": "OSS Radar discussions — draft-first",
-      "command": "ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community 2>/dev/null || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach; tmux select-window -t cockpit-community:discussions; tmux attach -d -t cockpit-community'",
+      "subtitle": "OSS Radar discussions \u2014 draft-first",
+      "command": "bin/cmux-cockpit-page community -- ssh -t mbp-runtime 'PATH=/Users/openclaw/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; tmux attach -t cockpit-community 2>/dev/null || /Users/openclaw/Code/hermes-tmux-workspaces/bin/cockpit-community --no-attach; tmux select-window -t cockpit-community:discussions; tmux attach -d -t cockpit-community'",
       "target": "newTabInCurrentPane",
       "confirm": false,
-      "keywords": ["discord", "community", "sdk", "draft"]
+      "keywords": [
+        "discord",
+        "community",
+        "sdk",
+        "draft"
+      ]
     }
   },
   "ui": {
@@ -157,6 +243,7 @@
         "danos.home",
         "hermes.ops",
         "openclaw.ops",
+        "herdr.ops",
         "cockpit.workspaceCards",
         "vault.root",
         "code.workbench",

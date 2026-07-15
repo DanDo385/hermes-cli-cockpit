@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: cmux-cockpit-page <page> -- <page command...>
+
+Reveal cmux's right-side Dock without moving focus, then execute the page command.
+The Dock is seeded by .cmux/dock.json; the page command usually SSH-attaches to
+an MBP-owned tmux mission or workbench session.
+EOF
+}
+
+[[ $# -ge 3 ]] || { usage; exit 64; }
+PAGE="$1"
+shift
+[[ "$1" == "--" ]] || { usage; exit 64; }
+shift
+
+case "$PAGE" in
+  home|hermes|openclaw|code|agents|review|browser|community|notes) ;;
+  *) printf 'cmux-cockpit-page: unknown page: %s\n' "$PAGE" >&2; exit 64 ;;
+esac
+
+cmux_bin() {
+  if [[ -n "${CMUX_BUNDLED_CLI_PATH:-}" && -x "${CMUX_BUNDLED_CLI_PATH}" ]]; then
+    printf '%s\n' "$CMUX_BUNDLED_CLI_PATH"
+    return 0
+  fi
+  if command -v cmux >/dev/null 2>&1; then
+    command -v cmux
+    return 0
+  fi
+  for candidate in /Applications/cmux.app/Contents/MacOS/cmux "$HOME/Applications/cmux.app/Contents/MacOS/cmux"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "${CMUX_COCKPIT_PAGE_DRY_RUN:-0}" == "1" ]]; then
+  printf 'page=%s\n' "$PAGE"
+  printf 'dock=cmux right-sidebar set dock --no-focus\n'
+  printf 'command='
+  printf '%q ' "$@"
+  printf '\n'
+  exit 0
+fi
+
+if cbin="$(cmux_bin)"; then
+  "$cbin" right-sidebar set dock --no-focus >/dev/null 2>&1 || \
+    printf 'cmux-cockpit-page: Dock could not be revealed; continuing with page command\n' >&2
+else
+  printf 'cmux-cockpit-page: cmux CLI not found; continuing with page command\n' >&2
+fi
+
+exec "$@"

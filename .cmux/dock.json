@@ -1,0 +1,67 @@
+{
+  "controls": [
+    {
+      "id": "cockpit-home",
+      "title": "Cockpit",
+      "command": "bin/cmux-dock-rail home --watch",
+      "cwd": ".",
+      "height": 360
+    },
+    {
+      "id": "hermes",
+      "title": "Hermes",
+      "command": "bin/cmux-dock-rail hermes --watch",
+      "cwd": ".",
+      "height": 360
+    },
+    {
+      "id": "openclaw",
+      "title": "OpenClaw",
+      "command": "bin/cmux-dock-rail openclaw --watch",
+      "cwd": ".",
+      "height": 340
+    },
+    {
+      "id": "neovim",
+      "title": "Neovim",
+      "command": "bin/cmux-dock-rail code --watch",
+      "cwd": ".",
+      "height": 420
+    },
+    {
+      "id": "agents",
+      "title": "Agents",
+      "command": "bin/cmux-dock-rail agents --watch",
+      "cwd": ".",
+      "height": 360
+    },
+    {
+      "id": "review",
+      "title": "Review",
+      "command": "bin/cmux-dock-rail review --watch",
+      "cwd": ".",
+      "height": 340
+    },
+    {
+      "id": "browser",
+      "title": "Browser",
+      "command": "bin/cmux-dock-rail browser --watch",
+      "cwd": ".",
+      "height": 340
+    },
+    {
+      "id": "community",
+      "title": "Community",
+      "command": "bin/cmux-dock-rail community --watch",
+      "cwd": ".",
+      "height": 340
+    },
+    {
+      "id": "notes",
+      "title": "Notes",
+      "command": "bin/cmux-dock-rail notes --watch",
+      "cwd": ".",
+      "height": 320
+    }
+  ]
+}

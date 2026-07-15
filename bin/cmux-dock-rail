@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+MENTOR="$ROOT/bin/keystroke-mentor"
+PAGE="${1:-home}"
+WATCH=0
+
+if [[ "${2:-}" == "--watch" ]]; then
+  WATCH=1
+elif [[ $# -gt 1 ]]; then
+  printf 'Usage: %s <home|hermes|openclaw|code|agents|review|browser|community|notes> [--watch]\n' "$0" >&2
+  exit 64
+fi
+
+case "$PAGE" in
+  home) CONTEXT="shell"; TITLE="Cockpit navigation" ;;
+  hermes) CONTEXT="hermes"; TITLE="Hermes CLI Mission Control" ;;
+  openclaw) CONTEXT="openclaw"; TITLE="OpenClaw Mission Control" ;;
+  code) CONTEXT="nvim"; TITLE="Neovim and code runway" ;;
+  agents) CONTEXT="agent"; TITLE="Agent Deck" ;;
+  review) CONTEXT="git"; TITLE="Review and Git gate" ;;
+  browser) CONTEXT="shell"; TITLE="Browser and verification loop" ;;
+  community) CONTEXT="github"; TITLE="OSS radar and community" ;;
+  notes) CONTEXT="obsidian"; TITLE="Obsidian and operational notes" ;;
+  *)
+    printf 'cmux-dock-rail: unknown page: %s\n' "$PAGE" >&2
+    exit 64
+    ;;
+esac
+
+render() {
+  clear 2>/dev/null || true
+  printf 'CMUX COMMAND DOCK :: %s\n' "$TITLE"
+  printf '%*s\n' "${COLUMNS:-72}" '' | tr ' ' '='
+  cat <<'GLOBAL'
+GLOBAL CMUX
+  Cmd+T           new terminal surface
+  Cmd+D           split right
+  Cmd+Shift+D     split down
+  Cmd+Shift+L     new browser surface
+  Cmd+P           command palette
+  Dock mode       cmux right-sidebar set dock --no-focus
+
+SAFE RUNTIME BOUNDARY
+  iMac cmux renders and hosts browser/reference surfaces.
+  MBP tmux owns mission-hermes, mission-openclaw, Neovim workbench, and durable shells.
+  launchd owns gateways. Herdr, if adopted, owns only its separate agent PTYs.
+GLOBAL
+  printf '\nPAGE-SPECIFIC\n'
+  "$MENTOR" --context "$CONTEXT" --limit 7
+
+  case "$PAGE" in
+    hermes)
+      cat <<'EOF'
+MBP ROUTES
+  tmux attach -d -t mission-hermes
+  hermes gateway status
+  hermes sessions list
+EOF
+      ;;
+    openclaw)
+      cat <<'EOF'
+MBP ROUTES
+  tmux attach -d -t mission-openclaw
+  openclaw gateway status
+EOF
+      ;;
+    code)
+      cat <<'EOF'
+NEOVIM / MBP ROUTES
+  tmux attach -d -t cockpit-workbench
+  nvim .
+  :checktime      reload agent-modified files before saving
+EOF
+      ;;
+    agents)
+      cat <<'EOF'
+AGENT SAFETY
+  agent-worktree --repo <repo> list
+  git diff --check && git diff
+  One agent, one branch, one worktree.
+EOF
+      ;;
+    review)
+      cat <<'EOF'
+ACCEPTANCE GATE
+  git diff --check
+  git diff
+  <project test command>
+  No merge or public action without explicit operator approval.
+EOF
+      ;;
+    browser)
+      cat <<'EOF'
+BROWSER LOOP
+  cmux browser open <url>
+  cmux browser screenshot --out <safe-local-path>
+  curl -I <url>
+  Verify the running UI, not merely a passing build.
+EOF
+      ;;
+    community)
+      cat <<'EOF'
+COMMUNITY SAFETY
+  gh pr status
+  gh repo view
+  Draft Discord/community content first. No surprise posting.
+EOF
+      ;;
+    notes)
+      cat <<'EOF'
+NOTES
+  cd ~/.hermes/workspace
+  Keep runtime secrets, tokens, and raw credentials out of notes and commits.
+EOF
+      ;;
+  esac
+
+  printf '\nDock controls: select the tab matching the active page. Ctrl-C stops this rail.\n'
+}
+
+if [[ "$WATCH" -eq 1 ]]; then
+  while true; do
+    render
+    sleep 20
+  done
+else
+  render
+fi
