@@ -34,17 +34,40 @@ python3 - "$ROOT/.cmux/cmux.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as fh:
     cfg = json.load(fh)
-required = {
-    'danos.home', 'hermes.ops', 'openclaw.ops', 'herdr.ops', 'code.workbench',
-    'code.browser', 'agent.deck', 'oss.radar', 'github.review', 'obsidian.notes',
-    'discord.workflow', 'vault.root',
+workspace_pages = {
+    'hermes.ops': ('Hermes Ops', 'mission-hermes'),
+    'openclaw.ops': ('OpenClaw Ops', 'mission-openclaw'),
+    'code.workbench': ('Code Workbench', 'cockpit-workbench'),
+    'agent.deck': ('Agent Deck', 'cockpit-workbench:agents'),
+    'oss.radar': ('Community / Review', 'cockpit-community'),
 }
-missing = required.difference(cfg['actions'])
-assert not missing, f'missing actions: {sorted(missing)}'
-for action_id in required:
+for action_id, (workspace_name, tmux_target) in workspace_pages.items():
+    action = cfg['actions'][action_id]
+    assert action['type'] == 'workspace', action_id
+    assert action['restart'] == 'ignore', action_id
+    assert action['newWorkspaceMenu'] is True, action_id
+    workspace = action['workspace']
+    assert workspace['name'] == workspace_name, action_id
+    command = workspace['layout']['pane']['surfaces'][0]['command']
+    assert 'bin/cmux-cockpit-page' in command, action_id
+    assert f'tmux attach -t {tmux_target.split(":")[0]}' in command, action_id
+
+# Browser remains a normal in-pane action until Dan explicitly redesigns Browser Lab.
+assert cfg['actions']['code.browser']['type'] == 'command'
+assert cfg['actions']['code.browser']['target'] == 'newTabInCurrentPane'
+
+for action_id in {'danos.home', 'herdr.ops', 'code.browser', 'github.review', 'obsidian.notes', 'discord.workflow', 'vault.root'}:
     assert 'bin/cmux-cockpit-page' in cfg['actions'][action_id]['command'], action_id
+
+legacy_names = {command['name'] for command in cfg['commands']}
+assert not legacy_names.intersection({
+    'Hermes Tool / Hermes CLI Mission Control',
+    'OpenClaw Tool / OpenClaw CLI Mission Control',
+    'Coding Workbench',
+    'Agent Deck',
+    'Open Source Radar / Community',
+})
 assert 'herdr.ops' in cfg['ui']['surfaceTabBar']['buttons']
-assert all('bin/cmux-cockpit-page' in command['command'] for command in cfg['commands'])
 PY
 
 printf '== invalid rail page ==\n'
